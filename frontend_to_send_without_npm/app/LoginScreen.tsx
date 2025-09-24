@@ -41,12 +41,12 @@ const LoginScreen: React.FC = () => {
       const response = await ApiService.login({ email, password });
       
       // Store auth data
-      await StorageService.setAuthToken('dummy-token'); // Replace with real JWT
+      await StorageService.setAuthToken('dummy-token'); // You'll implement JWT later
       await StorageService.setUserData({
         Id: response.user_id,
         Name: response.name,
         email: email,
-        expiry: '', // Get from API response
+        expiry: '', // You can get this from the API response
       });
 
       // Navigate to main app
@@ -200,3 +200,4 @@ const styles = StyleSheet.create({
 });
 
 export default LoginScreen;
+

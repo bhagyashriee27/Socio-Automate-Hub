@@ -21,12 +21,12 @@ const AccountsScreen: React.FC = () => {
   const [modalVisible, setModalVisible] = useState(false);
   const [modalType, setModalType] = useState<'instagram' | 'telegram'>('instagram');
   const [formData, setFormData] = useState({
-    username: ' username',
-    password: 'password',
-    email: 'email',
-    channel_name: 'channel_name',
-    token_sesson: 'token_sesson',
-    google_drive_link: 'google_drive_link',
+    username: '',
+    password: '',
+    email: '',
+    channel_name: '',
+    token_sesson: '',
+    google_drive_link: '',
     sch_start_range: '09:00:00',
     sch_end_range: '17:00:00',
     number_of_posts: '5',
@@ -64,12 +64,12 @@ const AccountsScreen: React.FC = () => {
   const openAddModal = (type: 'instagram' | 'telegram') => {
     setModalType(type);
     setFormData({
-      username: 'username',
-      password: 'password',
-      email: 'email',
-      channel_name: 'channel_name',
-      token_sesson: 'token_sesson',
-      google_drive_link: 'google_drive_link',
+      username: '',
+      password: '',
+      email: '',
+      channel_name: '',
+      token_sesson: '',
+      google_drive_link: '',
       sch_start_range: '09:00:00',
       sch_end_range: '17:00:00',
       number_of_posts: '5',

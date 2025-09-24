@@ -6,18 +6,21 @@ import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
 // Import screens
 import AccountsScreen from './AccountsScreen';
 import DashboardScreen from './DashboardScreen';
-import LoginScreen from './index'; // Updated to import index.tsx
+import LoginScreen from './LoginScreen';
 import SignupScreen from './SignupScreen';
-import Profile from './Profile';
+import Profile from './Profile'; // Import the real Profile component
 
-// Import services
+// Import types and services
 import StorageService from '../utils/storage';
+
+const Stack = createStackNavigator();
+const Tab = createBottomTabNavigator();
 
 // Placeholder screens
 const ScheduleScreen = () => (
   <View style={styles.placeholderContainer}>
-    <Text style={styles.placeholderText}>Schedule Screen</Text>
-    <Text style={styles.placeholderSubtext}>work in progress</Text>
+    <Text style={styles.placeholderText}>Schedule Screen 👀</Text>
+    <Text style={styles.placeholderSubtext}>kam chal ra hai</Text>
   </View>
 );
 
@@ -44,35 +47,54 @@ const MainTabs = () => (
     <Tab.Screen
       name="Dashboard"
       component={DashboardScreen}
-      options={{ tabBarLabel: 'Dashboard', tabBarIcon: ({ color }) => <Text style={{ color, fontSize: 20 }}>📊</Text>, headerTitle: 'Dashboard' }}
+      options={{
+        tabBarLabel: 'Dashboard',
+        tabBarIcon: ({ color }) => <Text style={{ color, fontSize: 20 }}>📊</Text>,
+        headerTitle: 'Dashboard',
+      }}
     />
     <Tab.Screen
       name="Accounts"
       component={AccountsScreen}
-      options={{ tabBarLabel: 'Accounts', tabBarIcon: ({ color }) => <Text style={{ color, fontSize: 20 }}>👥</Text>, headerTitle: 'Social Media Accounts' }}
+      options={{
+        tabBarLabel: 'Accounts',
+        tabBarIcon: ({ color }) => <Text style={{ color, fontSize: 20 }}>👥</Text>,
+        headerTitle: 'Social Media Accounts',
+      }}
     />
     <Tab.Screen
       name="Schedule"
       component={ScheduleScreen}
-      options={{ tabBarLabel: 'Schedule', tabBarIcon: ({ color }) => <Text style={{ color, fontSize: 20 }}>📅</Text>, headerTitle: 'Schedule Posts' }}
+      options={{
+        tabBarLabel: 'Schedule',
+        tabBarIcon: ({ color }) => <Text style={{ color, fontSize: 20 }}>📅</Text>,
+        headerTitle: 'Schedule Posts',
+      }}
     />
+
+    
     <Tab.Screen
       name="Upload"
       component={UploadScreen}
-      options={{ tabBarLabel: 'Upload', tabBarIcon: ({ color }) => <Text style={{ color, fontSize: 20 }}>📤</Text>, headerTitle: 'Upload Media' }}
+      options={{
+        tabBarLabel: 'Upload',
+        tabBarIcon: ({ color }) => <Text style={{ color, fontSize: 20 }}>📤</Text>,
+        headerTitle: 'Upload Media',
+      }}
     />
     <Tab.Screen
       name="Profile"
       component={Profile}
-      options={{ tabBarLabel: 'Profile', tabBarIcon: ({ color }) => <Text style={{ color, fontSize: 20 }}>👤</Text>, headerTitle: 'Profile' }}
+      options={{
+        tabBarLabel: 'Profile',
+        tabBarIcon: ({ color }) => <Text style={{ color, fontSize: 20 }}>👤</Text>,
+        headerTitle: 'Profile',
+      }}
     />
   </Tab.Navigator>
 );
 
-const Stack = createStackNavigator();
-const Tab = createBottomTabNavigator();
-
-export default function RootLayout() {
+export default function Layout() {
   const [isLoading, setIsLoading] = useState(true);
   const [isLoggedIn, setIsLoggedIn] = useState(false);
 
@@ -83,7 +105,6 @@ export default function RootLayout() {
   const checkAuthStatus = async () => {
     try {
       const loggedIn = await StorageService.isLoggedIn();
-      console.log('Is logged in:', loggedIn); // Debug log
       setIsLoggedIn(loggedIn);
     } catch (error) {
       console.error('Error checking auth status:', error);
@@ -103,14 +124,14 @@ export default function RootLayout() {
   }
 
   return (
-    <Stack.Navigator
-      initialRouteName={isLoggedIn ? 'Main' : 'index'}
-      screenOptions={{ headerShown: false }}
-    >
-      <Stack.Screen name="index" component={LoginScreen} />
-      <Stack.Screen name="Signup" component={SignupScreen} />
-      <Stack.Screen name="Main" component={MainTabs} />
-    </Stack.Navigator>
+      <Stack.Navigator
+        initialRouteName={isLoggedIn ? 'Main' : 'Login'}
+        screenOptions={{ headerShown: false }}
+      >
+        <Stack.Screen name="Login" component={LoginScreen} />
+        <Stack.Screen name="Signup" component={SignupScreen} />
+        <Stack.Screen name="Main" component={MainTabs} />
+      </Stack.Navigator>
   );
 }
 

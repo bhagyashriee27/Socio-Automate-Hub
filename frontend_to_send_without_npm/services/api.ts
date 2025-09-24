@@ -11,7 +11,7 @@ import {
 } from '../types';
 
 // Base URL for your Flask API - Update this to your server URL
-const BASE_URL = 'https://credible-mastodon-fully.ngrok-free.app'; // Change this to your actual server URL
+const BASE_URL = 'https://monitor-renewing-oarfish.ngrok-free.app'; // Change this to your actual server URL
 
 const api = axios.create({
   baseURL: BASE_URL,
