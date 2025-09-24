@@ -40,7 +40,7 @@ app-example
 
 1credentials.json
 credentials.json
-frontend_to_send_without_npm
+frontend_to_send_without_npm/node_modules
 
 *.json
 .env
