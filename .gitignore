@@ -1,0 +1,35 @@
+# Node modules
+/frontend/node_modules/
+/backend/node_modules/
+
+# Zip files
+*.zip
+
+# Images
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.svg
+*.webp
+
+# Videos
+*.mp4
+*.mov
+*.avi
+*.mkv
+*.flv
+*.wmv
+
+# Credentials
+credentials.json
+/frontend/node_modules/credentials.json
+/backend/node_modules/credentials.json
+*.sql
+.env
+
+
+token_1.json
+
+
+
