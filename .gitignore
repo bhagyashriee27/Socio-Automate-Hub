@@ -5,14 +5,6 @@
 # Zip files
 *.zip
 
-# Images
-*.png
-*.jpg
-*.jpeg
-*.gif
-*.svg
-*.webp
-
 # Videos
 *.mp4
 *.mov
@@ -28,8 +20,7 @@ credentials.json
 *.sql
 .env
 
-
 token_1.json
 
-
-
+# Exclude all images except those in assets/images/
+!assets/images/
