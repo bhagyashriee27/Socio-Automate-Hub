@@ -10,6 +10,7 @@ import {
   ActivityIndicator,
   Modal,
   FlatList,
+  Platform,
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { Picker } from '@react-native-picker/picker';
@@ -24,7 +25,7 @@ interface MediaFile {
   name: string;
   status: 'pending' | 'uploading' | 'completed' | 'failed';
   progress?: number;
-  selected?: boolean; // Add selection state
+  selected?: boolean;
 }
 
 const UploadScreen: React.FC = () => {
@@ -36,6 +37,7 @@ const UploadScreen: React.FC = () => {
   const [user, setUser] = useState<any>(null);
   const [modalVisible, setModalVisible] = useState(false);
   const [uploadProgress, setUploadProgress] = useState<{[key: string]: number}>({});
+  const [accountSelectorVisible, setAccountSelectorVisible] = useState(false);
 
   useEffect(() => {
     loadUserData();
@@ -115,7 +117,7 @@ const UploadScreen: React.FC = () => {
           type: asset.type === 'video' ? 'video' : 'image',
           name: asset.fileName || `media-${Date.now()}-${index}.${asset.type === 'video' ? 'mp4' : 'jpg'}`,
           status: 'pending',
-          selected: true, // Default to selected
+          selected: true,
         }));
 
         setSelectedMedia(prev => [...prev, ...newMedia]);
@@ -186,30 +188,26 @@ const UploadScreen: React.FC = () => {
     let successfulUploads = 0;
     let failedUploads = 0;
 
-    // Upload files sequentially to avoid overwhelming the server
     for (let i = 0; i < mediaToUpload.length; i++) {
       const media = mediaToUpload[i];
       
       try {
         const formData = new FormData();
         
-        // Append file to form data
         formData.append('file', {
           uri: media.uri,
           type: media.type === 'image' ? 'image/jpeg' : 'video/mp4',
           name: media.name,
         } as any);
 
-        // Append additional data
         formData.append('account_id', selectedAccount);
         formData.append('platform', platform);
         formData.append('user_id', user.Id.toString());
 
-        // Simulate progress (in real app, you'd use axios progress events)
         const progressInterval = setInterval(() => {
           setUploadProgress(prev => ({
             ...prev,
-            [media.id]: Math.min((prev[media.id] || 0) + 10, 90) // Simulate progress up to 90%
+            [media.id]: Math.min((prev[media.id] || 0) + 10, 90)
           }));
         }, 200);
 
@@ -219,7 +217,6 @@ const UploadScreen: React.FC = () => {
         clearInterval(progressInterval);
         setUploadProgress(prev => ({ ...prev, [media.id]: 100 }));
 
-        // FIX: Check for success more reliably
         if (response.message || response.file_id) {
           setSelectedMedia(prev => 
             prev.map(m => m.id === media.id ? { ...m, status: 'completed' } : m)
@@ -230,7 +227,6 @@ const UploadScreen: React.FC = () => {
           throw new Error(response.error || 'Upload failed without specific error');
         }
 
-        // Small delay between uploads
         await new Promise(resolve => setTimeout(resolve, 500));
 
       } catch (error: any) {
@@ -240,7 +236,6 @@ const UploadScreen: React.FC = () => {
         );
         failedUploads++;
         
-        // Log detailed error information
         if (error.response) {
           console.error('Error response:', error.response.data);
         }
@@ -250,10 +245,8 @@ const UploadScreen: React.FC = () => {
 
     setUploading(false);
 
-    // Show summary
     if (successfulUploads > 0 && failedUploads === 0) {
       Alert.alert('Success', `All ${successfulUploads} files uploaded successfully!`);
-      // Only remove completed files
       setSelectedMedia(prev => prev.filter(media => media.status !== 'completed'));
       if (getSelectedMedia().length === 0) {
         setModalVisible(false);
@@ -264,7 +257,6 @@ const UploadScreen: React.FC = () => {
         `${successfulUploads} files uploaded successfully, ${failedUploads} failed.`,
         [{ text: 'OK' }]
       );
-      // Remove only completed files
       setSelectedMedia(prev => prev.filter(media => media.status !== 'completed'));
     } else {
       Alert.alert('Upload Failed', 'All files failed to upload. Please try again.');
@@ -287,6 +279,19 @@ const UploadScreen: React.FC = () => {
     }
   };
 
+  const getAccountDisplayName = (account: any) => {
+    switch (platform) {
+      case 'instagram':
+        return account.username;
+      case 'telegram':
+        return account.channel_name;
+      case 'youtube':
+        return account.username;
+      default:
+        return 'Unknown';
+    }
+  };
+
   const getStatusColor = (status: MediaFile['status']) => {
     switch (status) {
       case 'completed': return '#34C759';
@@ -305,6 +310,109 @@ const UploadScreen: React.FC = () => {
     }
   };
 
+  const handleAccountSelect = (accountId: string) => {
+    setSelectedAccount(accountId);
+    setAccountSelectorVisible(false);
+  };
+
+  // Render account selection based on platform
+  const renderAccountSelection = () => {
+    if (accounts.length === 0) {
+      return (
+        <View style={styles.emptyState}>
+          <Text style={styles.emptyText}>
+            No {platform} accounts found
+          </Text>
+          <Text style={styles.emptySubtext}>
+            Please add an account first to upload media
+          </Text>
+        </View>
+      );
+    }
+
+    // Use Picker for Android, custom modal for iOS
+    if (Platform.OS === 'android') {
+      return (
+        <View style={styles.pickerContainer}>
+          <Picker
+            selectedValue={selectedAccount}
+            onValueChange={(itemValue) => setSelectedAccount(itemValue)}
+            style={styles.picker}
+          >
+            <Picker.Item label="Select an account" value="" />
+            {accounts.map((account) => (
+              <Picker.Item
+                key={account.id}
+                label={getAccountDisplayName(account)}
+                value={account.id.toString()}
+              />
+            ))}
+          </Picker>
+        </View>
+      );
+    } else {
+      // iOS - Use custom modal selector
+      const selectedAccountObj = accounts.find(acc => acc.id.toString() === selectedAccount);
+      
+      return (
+        <View>
+          <TouchableOpacity
+            style={styles.iosAccountSelector}
+            onPress={() => setAccountSelectorVisible(true)}
+          >
+            <Text style={styles.iosAccountSelectorText}>
+              {selectedAccountObj ? getAccountDisplayName(selectedAccountObj) : 'Select an account'}
+            </Text>
+            <Text style={styles.iosAccountSelectorArrow}>▼</Text>
+          </TouchableOpacity>
+
+          {/* Account Selection Modal for iOS */}
+          <Modal
+            visible={accountSelectorVisible}
+            transparent={true}
+            animationType="slide"
+            onRequestClose={() => setAccountSelectorVisible(false)}
+          >
+            <View style={styles.iosModalOverlay}>
+              <View style={styles.iosModalContent}>
+                <View style={styles.iosModalHeader}>
+                  <Text style={styles.iosModalTitle}>Select Account</Text>
+                  <TouchableOpacity 
+                    onPress={() => setAccountSelectorVisible(false)}
+                    style={styles.iosModalCloseButton}
+                  >
+                    <Text style={styles.iosModalCloseText}>Done</Text>
+                  </TouchableOpacity>
+                </View>
+                
+                <FlatList
+                  data={accounts}
+                  keyExtractor={(item) => item.id.toString()}
+                  renderItem={({ item }) => (
+                    <TouchableOpacity
+                      style={[
+                        styles.iosAccountItem,
+                        selectedAccount === item.id.toString() && styles.iosAccountItemSelected
+                      ]}
+                      onPress={() => handleAccountSelect(item.id.toString())}
+                    >
+                      <Text style={styles.iosAccountItemText}>
+                        {getAccountDisplayName(item)}
+                      </Text>
+                      {selectedAccount === item.id.toString() && (
+                        <Text style={styles.iosAccountItemCheck}>✓</Text>
+                      )}
+                    </TouchableOpacity>
+                  )}
+                />
+              </View>
+            </View>
+          </Modal>
+        </View>
+      );
+    }
+  };
+
   const MediaItem = ({ item }: { item: MediaFile }) => (
     <TouchableOpacity 
       style={[
@@ -314,7 +422,6 @@ const UploadScreen: React.FC = () => {
       onPress={() => toggleMediaSelection(item.id)}
       onLongPress={() => removeMedia(item.id)}
     >
-      {/* Selection Checkbox */}
       <View style={styles.checkboxContainer}>
         <View style={[
           styles.checkbox,
@@ -371,7 +478,6 @@ const UploadScreen: React.FC = () => {
     </TouchableOpacity>
   );
 
-  // Check if we can open the modal (only need an account selected)
   const canOpenModal = selectedAccount && accounts.length > 0;
   const selectedMediaCount = getSelectedMedia().length;
   const totalMediaCount = selectedMedia.length;
@@ -409,37 +515,7 @@ const UploadScreen: React.FC = () => {
           {/* Account Selection */}
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>Select Account</Text>
-            {accounts.length === 0 ? (
-              <View style={styles.emptyState}>
-                <Text style={styles.emptyText}>
-                  No {platform} accounts found
-                </Text>
-                <Text style={styles.emptySubtext}>
-                  Please add an account first to upload media
-                </Text>
-              </View>
-            ) : (
-              <View style={styles.pickerContainer}>
-                <Picker
-                  selectedValue={selectedAccount}
-                  onValueChange={(itemValue) => setSelectedAccount(itemValue)}
-                  style={styles.picker}
-                >
-                  <Picker.Item label="Select an account" value="" />
-                  {accounts.map((account) => (
-                    <Picker.Item
-                      key={account.id}
-                      label={
-                        platform === 'instagram' ? account.username :
-                        platform === 'telegram' ? account.channel_name :
-                        account.username
-                      }
-                      value={account.id.toString()}
-                    />
-                  ))}
-                </Picker>
-              </View>
-            )}
+            {renderAccountSelection()}
           </View>
 
           {/* Upload Stats & Button */}
@@ -722,6 +798,77 @@ const styles = StyleSheet.create({
   },
   picker: {
     height: 50,
+  },
+  // iOS-specific styles
+  iosAccountSelector: {
+    backgroundColor: '#fff',
+    padding: 15,
+    borderRadius: 10,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#ddd',
+  },
+  iosAccountSelectorText: {
+    fontSize: 16,
+    color: '#333',
+  },
+  iosAccountSelectorArrow: {
+    fontSize: 12,
+    color: '#666',
+  },
+  iosModalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'flex-end',
+  },
+  iosModalContent: {
+    backgroundColor: '#fff',
+    borderTopLeftRadius: 15,
+    borderTopRightRadius: 15,
+    maxHeight: '50%',
+  },
+  iosModalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f0f0f0',
+  },
+  iosModalTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#333',
+  },
+  iosModalCloseButton: {
+    padding: 4,
+  },
+  iosModalCloseText: {
+    fontSize: 16,
+    color: '#007AFF',
+    fontWeight: '500',
+  },
+  iosAccountItem: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f0f0f0',
+  },
+  iosAccountItemSelected: {
+    backgroundColor: '#f8f8f8',
+  },
+  iosAccountItemText: {
+    fontSize: 16,
+    color: '#333',
+  },
+  iosAccountItemCheck: {
+    fontSize: 16,
+    color: '#007AFF',
+    fontWeight: 'bold',
   },
   uploadSection: {
     marginBottom: 20,
@@ -1028,3 +1175,4 @@ const styles = StyleSheet.create({
 });
 
 export default UploadScreen;
+

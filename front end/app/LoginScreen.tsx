@@ -12,6 +12,7 @@ import {
   ScrollView,
   SafeAreaView,
   Animated,
+  Dimensions,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
@@ -27,6 +28,10 @@ const LoginScreen: React.FC = () => {
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const scrollY = useRef(new Animated.Value(0)).current;
+  const { height: windowHeight } = Dimensions.get('window');
+  const stickyTop = 80;
+  const initialTop = windowHeight * 0.45;
+  const scrollThreshold = initialTop - stickyTop;
 
   const handleLogin = async () => {
     if (!email || !password) {
@@ -71,6 +76,15 @@ const LoginScreen: React.FC = () => {
 
   return (
     <SafeAreaView style={styles.safeArea}>
+      <Animated.View style={[styles.titleContainer, {
+        top: scrollY.interpolate({
+          inputRange: [0, scrollThreshold],
+          outputRange: [initialTop, stickyTop],
+          extrapolate: 'clamp',
+        })
+      }]}>
+        <Text style={styles.title}>SocioMate</Text>
+      </Animated.View>
       <KeyboardAvoidingView
         style={styles.container}
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
@@ -83,13 +97,7 @@ const LoginScreen: React.FC = () => {
           )}
           scrollEventThrottle={16}
         >
-          <Animated.View style={[styles.background, { transform: [{ translateY: scrollY.interpolate({
-            inputRange: [0, 200],
-            outputRange: [0, -200],
-            extrapolate: 'clamp',
-          })}]}]}>
-            <Text style={styles.title}>SocioMate</Text>
-          </Animated.View>
+          <View style={styles.background} />
           <Animated.View style={[styles.formContainer, { opacity: scrollY.interpolate({
             inputRange: [0, 100],
             outputRange: [0, 1],
@@ -168,11 +176,17 @@ const styles = StyleSheet.create({
     flexGrow: 1,
   },
   background: {
-    flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
     backgroundColor: 'transparent',
     height: 600, // Increased height for initial view
+  },
+  titleContainer: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    alignItems: 'center',
+    zIndex: 10,
   },
   title: {
     fontSize: 45,
@@ -180,8 +194,6 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     color: '#e3d1e3ff', // Light purple for text, matching the design
     textAlign: 'center',
-    position: 'absolute',
-    top: '55%',
   },
   formContainer: {
     backgroundColor: '#E6E6FA', // Whitish background for form, matching the design

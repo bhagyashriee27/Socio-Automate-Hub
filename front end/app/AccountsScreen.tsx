@@ -10,18 +10,18 @@ import {
   Modal,
   TextInput,
 } from 'react-native';
+import Icon from 'react-native-vector-icons/MaterialIcons';
 import ApiService from '../services/api';
 import StorageService from '../utils/storage';
-import { InstagramAccount, TelegramAccount, FacebookAccount, YouTubeAccount, User } from '../types';
+import { InstagramAccount, TelegramAccount, YouTubeAccount, User } from '../types';
 
 const AccountsScreen: React.FC = () => {
   const [instagramAccounts, setInstagramAccounts] = useState<InstagramAccount[]>([]);
   const [telegramAccounts, setTelegramAccounts] = useState<TelegramAccount[]>([]);
-  const [facebookAccounts, setFacebookAccounts] = useState<FacebookAccount[]>([]);
   const [youtubeAccounts, setYoutubeAccounts] = useState<YouTubeAccount[]>([]);
   const [refreshing, setRefreshing] = useState(false);
   const [modalVisible, setModalVisible] = useState(false);
-  const [modalType, setModalType] = useState<'instagram' | 'telegram' | 'facebook' | 'youtube'>('instagram');
+  const [modalType, setModalType] = useState<'instagram' | 'telegram' | 'youtube'>('instagram');
   const [formData, setFormData] = useState({
     username: '',
     passwand: '',
@@ -51,7 +51,6 @@ const AccountsScreen: React.FC = () => {
       setUser(response.user);
       setInstagramAccounts(response.instagram_accounts || []);
       setTelegramAccounts(response.telegram_channels || []);
-      setFacebookAccounts(response.facebook_pages || []);
       setYoutubeAccounts(response.youtube_channels || []);
     } catch (error: any) {
       console.error('Error loading accounts:', error.response?.data?.error || error.message);
@@ -65,7 +64,7 @@ const AccountsScreen: React.FC = () => {
     setRefreshing(false);
   };
 
-  const openAddModal = (type: 'instagram' | 'telegram' | 'facebook' | 'youtube') => {
+  const openAddModal = (type: 'instagram' | 'telegram' | 'youtube') => {
     setModalType(type);
     setFormData({
       username: '',
@@ -83,7 +82,6 @@ const AccountsScreen: React.FC = () => {
 
   const handleAddAccount = async () => {
     try {
-      // Common validation
       const timeRegex = /^([0-1]?[0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]$/;
       if (!timeRegex.test(formData.sch_start_range) || !timeRegex.test(formData.sch_end_range)) {
         Alert.alert('Error', 'Please enter valid time in HH:MM:SS format (e.g., 09:00:00)');
@@ -101,8 +99,8 @@ const AccountsScreen: React.FC = () => {
         sch_end_range: formData.sch_end_range,
         number_of_posts: parseInt(formData.number_of_posts),
         posts_left: parseInt(formData.number_of_posts),
-        token_sesson: "{}", // Empty JSON object as string
-        google_drive_token: "{}", // Empty JSON object as string
+        token_sesson: "{}",
+        google_drive_token: "{}",
       };
 
       switch (modalType) {
@@ -132,21 +130,6 @@ const AccountsScreen: React.FC = () => {
           Alert.alert('Success', 'Telegram channel added successfully!');
           break;
 
-        case 'facebook':
-          if (!formData.username || !formData.passwand || !formData.channel_name || !formData.email) {
-            Alert.alert('Error', 'Please fill in all required fields (Username, Password, Page Name, Email)');
-            return;
-          }
-          await ApiService.addFacebookAccount({
-            username: formData.username,
-            passwand: formData.passwand,
-            password: formData.passwand,
-            channel_name: formData.channel_name,
-            ...commonData,
-          } as any);
-          Alert.alert('Success', 'Facebook page added successfully!');
-          break;
-
         case 'youtube':
           if (!formData.username || !formData.channel_id || !formData.email) {
             Alert.alert('Error', 'Please fill in all required fields (Channel Name, Channel ID, Email)');
@@ -169,7 +152,7 @@ const AccountsScreen: React.FC = () => {
     }
   };
 
-  const handleDeleteAccount = async (accountId: number, platform: 'instagram' | 'telegram' | 'facebook' | 'youtube') => {
+  const handleDeleteAccount = async (accountId: number, platform: 'instagram' | 'telegram' | 'youtube') => {
     Alert.alert(
       'Confirm Delete',
       'Are you sure you want to delete this account?',
@@ -186,9 +169,6 @@ const AccountsScreen: React.FC = () => {
                   break;
                 case 'telegram':
                   await ApiService.deleteTelegramAccount(accountId);
-                  break;
-                case 'facebook':
-                  await ApiService.deleteFacebookAccount(accountId);
                   break;
                 case 'youtube':
                   await ApiService.deleteYouTubeAccount(accountId);
@@ -220,7 +200,6 @@ const AccountsScreen: React.FC = () => {
   };
 
   const getAccountStatus = (account: any) => {
-    const now = new Date();
     const isInactiveBySelection = account.selected === 'No';
     const isOutsideTimeRange = !isInTimeRange(account.sch_start_range, account.sch_end_range);
     const hasNoPosts = account.posts_left <= 0;
@@ -251,7 +230,7 @@ const AccountsScreen: React.FC = () => {
     };
   };
 
-  const AccountCard = ({ account, platform }: { account: any; platform: 'instagram' | 'telegram' | 'facebook' | 'youtube' }) => {
+  const AccountCard = ({ account, platform }: { account: any; platform: 'instagram' | 'telegram' | 'youtube' }) => {
     const status = getAccountStatus(account);
     
     return (
@@ -266,7 +245,6 @@ const AccountsScreen: React.FC = () => {
           ]}>
             {platform === 'instagram' ? account.username : 
              platform === 'telegram' ? account.channel_name :
-             platform === 'facebook' ? account.channel_name || account.username :
              account.username}
           </Text>
           <View style={[styles.statusBadge, { backgroundColor: status.statusColor }]}>
@@ -287,30 +265,15 @@ const AccountsScreen: React.FC = () => {
               styles.accountInfo,
               status.isInactive && styles.inactiveText
             ]}>
-              📊 Posts: {account.posts_left}/{account.number_of_posts}
+              <Icon name="bar-chart" size={14} color={status.isInactive ? '#999' : '#666'} /> Posts: {account.posts_left}/{account.number_of_posts}
             </Text>
             <Text style={[
               styles.accountInfo,
               status.isInactive && styles.inactiveText
             ]}>
-              ⏰ {account.sch_start_range} - {account.sch_end_range}
+              <Icon name="schedule" size={14} color={status.isInactive ? '#999' : '#666'} /> {account.sch_start_range} - {account.sch_end_range}
             </Text>
           </View>
-          
-          {/* {platform === 'youtube' && account.channel_id && (
-            <Text style={[
-              styles.accountInfo,
-              status.isInactive && styles.inactiveText
-            ]}>
-              🆔 {account.channel_id}
-            </Text>
-          )} */}
-          
-          {/* {account.google_drive_link && (
-            <Text style={styles.driveLink} numberOfLines={1}>
-              📁 {account.google_drive_link}
-            </Text>
-          )} */}
         </View>
 
         <View style={styles.accountActions}>
@@ -318,6 +281,7 @@ const AccountsScreen: React.FC = () => {
             style={styles.deleteButton}
             onPress={() => handleDeleteAccount(account.id, platform)}
           >
+            <Icon name="delete" size={16} color="#fff" />
             <Text style={styles.deleteButtonText}>Delete</Text>
           </TouchableOpacity>
         </View>
@@ -333,7 +297,7 @@ const AccountsScreen: React.FC = () => {
   }: { 
     title: string; 
     accounts: any[]; 
-    platform: 'instagram' | 'telegram' | 'facebook' | 'youtube';
+    platform: 'instagram' | 'telegram' | 'youtube';
     emptyMessage: string;
   }) => (
     <>
@@ -353,7 +317,8 @@ const AccountsScreen: React.FC = () => {
         style={styles.addButton} 
         onPress={() => openAddModal(platform)}
       >
-        <Text style={styles.addButtonText}>+ Add {title}</Text>
+        <Icon name="add" size={16} color="#fff" />
+        <Text style={styles.addButtonText}>Add {title}</Text>
       </TouchableOpacity>
     </>
   );
@@ -378,13 +343,6 @@ const AccountsScreen: React.FC = () => {
           emptyMessage="No Telegram channels added yet"
         />
 
-        {/* <PlatformSection
-          title="Facebook Pages"
-          accounts={facebookAccounts}
-          platform="facebook"
-          emptyMessage="No Facebook pages added yet"
-        /> */}
-
         <PlatformSection
           title="YouTube Channels"
           accounts={youtubeAccounts}
@@ -405,100 +363,95 @@ const AccountsScreen: React.FC = () => {
               Add {
                 modalType === 'instagram' ? 'Instagram Account' :
                 modalType === 'telegram' ? 'Telegram Channel' :
-                modalType === 'facebook' ? 'Facebook Page' :
                 'YouTube Channel'
               }
             </Text>
             <ScrollView style={styles.modalForm}>
               {modalType === 'instagram' && (
                 <>
-                  <TextInput
-                    style={styles.input}
-                    value={formData.username}
-                    onChangeText={(text) => setFormData({ ...formData, username: text })}
-                    placeholder="Username *"
-                  />
-                  <TextInput
-                    style={styles.input}
-                    value={formData.passwand}
-                    onChangeText={(text) => setFormData({ ...formData, passwand: text })}
-                    placeholder="Password *"
-                    secureTextEntry
-                  />
+                  <View style={styles.inputContainer}>
+                    <Icon name="person" size={20} color="#666" style={styles.inputIcon} />
+                    <TextInput
+                      style={styles.input}
+                      value={formData.username}
+                      onChangeText={(text) => setFormData({ ...formData, username: text })}
+                      placeholder="Username *"
+                    />
+                  </View>
+                  <View style={styles.inputContainer}>
+                    <Icon name="lock" size={20} color="#666" style={styles.inputIcon} />
+                    <TextInput
+                      style={styles.input}
+                      value={formData.passwand}
+                      onChangeText={(text) => setFormData({ ...formData, passwand: text })}
+                      placeholder="Password *"
+                      secureTextEntry
+                    />
+                  </View>
                 </>
               )}
 
               {modalType === 'telegram' && (
-                <>
+                <View style={styles.inputContainer}>
+                  <Icon name="chat" size={20} color="#666" style={styles.inputIcon} />
                   <TextInput
                     style={styles.input}
                     value={formData.channel_name}
                     onChangeText={(text) => setFormData({ ...formData, channel_name: text })}
                     placeholder="Channel Name *"
                   />
-                </>
-              )}
-
-              {modalType === 'facebook' && (
-                <>
-                  <TextInput
-                    style={styles.input}
-                    value={formData.username}
-                    onChangeText={(text) => setFormData({ ...formData, username: text })}
-                    placeholder="Username *"
-                  />
-                  <TextInput
-                    style={styles.input}
-                    value={formData.passwand}
-                    onChangeText={(text) => setFormData({ ...formData, passwand: text })}
-                    placeholder="Password *"
-                    secureTextEntry
-                  />
-                  <TextInput
-                    style={styles.input}
-                    value={formData.channel_name}
-                    onChangeText={(text) => setFormData({ ...formData, channel_name: text })}
-                    placeholder="Page Name *"
-                  />
-                </>
+                </View>
               )}
 
               {modalType === 'youtube' && (
                 <>
-                  <TextInput
-                    style={styles.input}
-                    value={formData.username}
-                    onChangeText={(text) => setFormData({ ...formData, username: text })}
-                    placeholder="Channel Name *"
-                  />
-                  <TextInput
-                    style={styles.input}
-                    value={formData.channel_id}
-                    onChangeText={(text) => setFormData({ ...formData, channel_id: text })}
-                    placeholder="Channel ID * (e.g., UC8sAvgYCMM7r_pVsiBkC5kw)"
-                  />
+                  <View style={styles.inputContainer}>
+                    <Icon name="video-library" size={20} color="#666" style={styles.inputIcon} />
+                    <TextInput
+                      style={styles.input}
+                      value={formData.username}
+                      onChangeText={(text) => setFormData({ ...formData, username: text })}
+                      placeholder="Channel Name *"
+                    />
+                  </View>
+                  <View style={styles.inputContainer}>
+                    <Icon name="tag" size={20} color="#666" style={styles.inputIcon} />
+                    <TextInput
+                      style={styles.input}
+                      value={formData.channel_id}
+                      onChangeText={(text) => setFormData({ ...formData, channel_id: text })}
+                      placeholder="Channel ID * (e.g., UC8sAvgYCMM7r_pVsiBkC5kw)"
+                    />
+                  </View>
                 </>
               )}
 
-              <TextInput
-                style={styles.input}
-                value={formData.email}
-                onChangeText={(text) => setFormData({ ...formData, email: text })}
-                placeholder="Email *"
-                keyboardType="email-address"
-                autoCapitalize="none"
-              />
+              <View style={styles.inputContainer}>
+                <Icon name="email" size={20} color="#666" style={styles.inputIcon} />
+                <TextInput
+                  style={styles.input}
+                  value={formData.email}
+                  onChangeText={(text) => setFormData({ ...formData, email: text })}
+                  placeholder="Email *"
+                  keyboardType="email-address"
+                  autoCapitalize="none"
+                />
+              </View>
 
-              <TextInput
-                style={styles.input}
-                value={formData.google_drive_link}
-                onChangeText={(text) => setFormData({ ...formData, google_drive_link: text })}
-                placeholder="Google Drive Folder Link"
-                autoCapitalize="none"
-              />
+              <View style={styles.inputContainer}>
+                <Icon name="cloud" size={20} color="#666" style={styles.inputIcon} />
+                <TextInput
+                  style={styles.input}
+                  value={formData.google_drive_link}
+                  onChangeText={(text) => setFormData({ ...formData, google_drive_link: text })}
+                  placeholder="Google Drive Folder Link"
+                  autoCapitalize="none"
+                />
+              </View>
 
               <View style={styles.timeContainer}>
-                <View style={styles.timeInput}>
+                <View style={[styles.timeInput, styles.inputContainer]}>
+                  <Icon name="access-time" size={20} color="#666" style={styles.inputIcon} />
                   <TextInput
                     style={styles.input}
                     value={formData.sch_start_range}
@@ -506,7 +459,8 @@ const AccountsScreen: React.FC = () => {
                     placeholder="Start Time (HH:MM:SS) *"
                   />
                 </View>
-                <View style={styles.timeInput}>
+                <View style={[styles.timeInput, styles.inputContainer]}>
+                  <Icon name="access-time" size={20} color="#666" style={styles.inputIcon} />
                   <TextInput
                     style={styles.input}
                     value={formData.sch_end_range}
@@ -516,19 +470,24 @@ const AccountsScreen: React.FC = () => {
                 </View>
               </View>
 
-              <TextInput
-                style={styles.input}
-                value={formData.number_of_posts}
-                onChangeText={(text) => setFormData({ ...formData, number_of_posts: text })}
-                placeholder="Number of Posts *"
-                keyboardType="numeric"
-              />
+              <View style={styles.inputContainer}>
+                <Icon name="format-list-numbered" size={20} color="#666" style={styles.inputIcon} />
+                <TextInput
+                  style={styles.input}
+                  value={formData.number_of_posts}
+                  onChangeText={(text) => setFormData({ ...formData, number_of_posts: text })}
+                  placeholder="Number of Posts *"
+                  keyboardType="numeric"
+                />
+              </View>
             </ScrollView>
             <View style={styles.modalActions}>
               <TouchableOpacity style={styles.cancelButton} onPress={() => setModalVisible(false)}>
+                <Icon name="cancel" size={16} color="#fff" />
                 <Text style={styles.cancelButtonText}>Cancel</Text>
               </TouchableOpacity>
               <TouchableOpacity style={styles.saveButton} onPress={handleAddAccount}>
+                <Icon name="save" size={16} color="#fff" />
                 <Text style={styles.saveButtonText}>Save</Text>
               </TouchableOpacity>
             </View>
@@ -542,7 +501,7 @@ const AccountsScreen: React.FC = () => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f5f5f5',
+    backgroundColor: '#ffffff',
   },
   content: {
     padding: 15,
@@ -558,12 +517,15 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   addButton: {
-    backgroundColor: '#007AFF',
+    backgroundColor: '#0052cc',
     paddingVertical: 12,
     paddingHorizontal: 16,
     borderRadius: 8,
     alignItems: 'center',
     marginBottom: 20,
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: 8,
   },
   addButtonText: {
     color: '#fff',
@@ -571,7 +533,7 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   accountCard: {
-    backgroundColor: '#fff',
+    backgroundColor: '#ffffff',
     padding: 16,
     borderRadius: 12,
     marginBottom: 12,
@@ -640,22 +602,19 @@ const styles = StyleSheet.create({
   inactiveText: {
     color: '#999',
   },
-  driveLink: {
-    fontSize: 11,
-    color: '#007AFF',
-    marginBottom: 4,
-    fontStyle: 'italic',
-  },
   accountActions: {
     flexDirection: 'row',
     justifyContent: 'flex-end',
     marginTop: 8,
   },
   deleteButton: {
-    backgroundColor: '#FF3B30',
+    backgroundColor: '#b00020',
     paddingHorizontal: 16,
     paddingVertical: 6,
     borderRadius: 6,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
   },
   deleteButtonText: {
     color: '#fff',
@@ -663,7 +622,7 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   emptyState: {
-    backgroundColor: '#fff',
+    backgroundColor: '#ffffff',
     padding: 20,
     borderRadius: 10,
     alignItems: 'center',
@@ -681,7 +640,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   modalContent: {
-    backgroundColor: '#fff',
+    backgroundColor: '#ffffff',
     borderRadius: 12,
     padding: 20,
     width: '90%',
@@ -697,15 +656,23 @@ const styles = StyleSheet.create({
   modalForm: {
     maxHeight: 400,
   },
+  inputContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  inputIcon: {
+    marginRight: 8,
+  },
   input: {
+    flex: 1,
     borderWidth: 1,
     borderColor: '#ddd',
     borderRadius: 8,
     paddingHorizontal: 12,
     paddingVertical: 12,
     fontSize: 14,
-    marginBottom: 12,
-    backgroundColor: '#fff',
+    backgroundColor: '#ffffff',
   },
   timeContainer: {
     flexDirection: 'row',
@@ -721,24 +688,32 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   cancelButton: {
-    backgroundColor: '#ccc',
+    backgroundColor: '#666666',
     paddingHorizontal: 16,
     paddingVertical: 12,
     borderRadius: 8,
     flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
   },
   cancelButtonText: {
-    color: '#333',
+    color: '#fff',
     textAlign: 'center',
     fontSize: 14,
     fontWeight: '600',
   },
   saveButton: {
-    backgroundColor: '#007AFF',
+    backgroundColor: '#0052cc',
     paddingHorizontal: 16,
     paddingVertical: 12,
     borderRadius: 8,
     flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
   },
   saveButtonText: {
     color: '#fff',

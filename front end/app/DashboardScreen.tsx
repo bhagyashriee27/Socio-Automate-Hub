@@ -1,0 +1,663 @@
+import React, { useState, useEffect } from 'react';
+import {
+  View,
+  Text,
+  StyleSheet,
+  ScrollView,
+  RefreshControl,
+  TouchableOpacity,
+  Alert,
+  Modal,
+  TextInput,
+} from 'react-native';
+import { useNavigation, NavigationProp } from '@react-navigation/native';
+import FontAwesome from 'react-native-vector-icons/FontAwesome'; // For Instagram, Telegram, and YouTube icons
+import MaterialIcons from 'react-native-vector-icons/MaterialIcons'; // For Schedule and Upload icons
+import StorageService from '../utils/storage';
+import ApiService from '../services/api';
+import { User, InstagramAccount, TelegramAccount } from '../types';
+
+type TabParamList = {
+  Dashboard: undefined;
+  Accounts: undefined;
+  Schedule: undefined;
+  Upload: undefined;
+  Profile: undefined;
+};
+
+const DashboardScreen: React.FC = () => {
+  const navigation = useNavigation<NavigationProp<TabParamList>>();
+  const [user, setUser] = useState<User | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
+  const [stats, setStats] = useState({
+    totalAccounts: 0,
+    activeSchedules: 0,
+    postsToday: 0,
+    instagramAccounts: 0,
+    telegramAccounts: 0,
+  });
+  const [modalVisible, setModalVisible] = useState(false);
+  const [modalType, setModalType] = useState<'instagram' | 'telegram' | 'youtube'>('instagram');
+  const [formData, setFormData] = useState({
+    username: '',
+    passwand: '',
+    email: '',
+    channel_name: '',
+    google_drive_link: '',
+    sch_start_range: '09:00:00',
+    sch_end_range: '17:00:00',
+    number_of_posts: '5',
+    channel_id: '',
+  });
+
+  useEffect(() => {
+    loadUserData();
+    loadDashboardData();
+  }, []);
+
+  const loadUserData = async () => {
+    try {
+      const userData = await StorageService.getUserData();
+      setUser(userData);
+    } catch (error) {
+      console.error('Error loading user data:', error);
+    }
+  };
+
+  const loadDashboardData = async () => {
+    try {
+      if (!user?.Id) {
+        await loadUserData(); // Ensure user data is loaded
+        if (!user?.Id) return; // Exit if still no user
+      }
+
+      // Fetch user-specific data from /user/<id>
+      const response = await ApiService.getUser(user.Id);
+      const { instagram_accounts, telegram_channels, facebook_pages, youtube_channels } = response;
+
+      // Calculate stats
+      const instagramActive = instagram_accounts.filter((acc: InstagramAccount) => acc.selected === 'Yes').length;
+      const telegramActive = telegram_channels.filter((acc: TelegramAccount) => acc.selected === 'Yes').length;
+      const facebookActive = facebook_pages.filter((acc: any) => acc.selected === 'Yes').length;
+      const youtubeActive = youtube_channels.filter((acc: any) => acc.selected === 'Yes').length;
+
+      // Calculate posts today (posts with next_post_time within today)
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const tomorrow = new Date(today);
+      tomorrow.setDate(today.getDate() + 1);
+
+      const countPostsToday = (accounts: any[]) =>
+        accounts.filter((acc: any) => {
+          if (!acc.next_post_time) return false;
+          const postTime = new Date(acc.next_post_time);
+          return postTime >= today && postTime < tomorrow;
+        }).length;
+
+      const postsToday =
+        countPostsToday(instagram_accounts) +
+        countPostsToday(telegram_channels) +
+        countPostsToday(facebook_pages) +
+        countPostsToday(youtube_channels);
+
+      setStats({
+        totalAccounts:
+          instagram_accounts.length +
+          telegram_channels.length +
+          facebook_pages.length +
+          youtube_channels.length,
+        activeSchedules: instagramActive + telegramActive + facebookActive + youtubeActive,
+        postsToday,
+        instagramAccounts: instagram_accounts.length,
+        telegramAccounts: telegram_channels.length,
+      });
+    } catch (error: any) {
+      console.error('Error loading dashboard data:', error);
+      Alert.alert('Error', 'Failed to load dashboard data');
+    }
+  };
+
+  const onRefresh = async () => {
+    setRefreshing(true);
+    await loadDashboardData();
+    setRefreshing(false);
+  };
+
+  const StatCard: React.FC<{ title: string; value: number; color: string }> = ({
+    title,
+    value,
+    color,
+  }) => (
+    <View style={[styles.statCard, { borderLeftColor: color }]}>
+      <Text style={styles.statValue}>{value}</Text>
+      <Text style={styles.statTitle}>{title}</Text>
+    </View>
+  );
+
+  const handleUploadForm = () => {
+    navigation.navigate('Upload');
+  };
+
+  const openAddModal = (type: 'instagram' | 'telegram' | 'youtube') => {
+    setModalType(type);
+    setFormData({
+      username: '',
+      passwand: '',
+      email: user?.email || '',
+      channel_name: '',
+      google_drive_link: '',
+      sch_start_range: '09:00:00',
+      sch_end_range: '17:00:00',
+      number_of_posts: '5',
+      channel_id: '',
+    });
+    setModalVisible(true);
+  };
+
+  const handleAddAccount = async () => {
+    try {
+      // Common validation
+      const timeRegex = /^([0-1]?[0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]$/;
+      if (!timeRegex.test(formData.sch_start_range) || !timeRegex.test(formData.sch_end_range)) {
+        Alert.alert('Error', 'Please enter valid time in HH:MM:SS format (e.g., 09:00:00)');
+        return;
+      }
+      if (isNaN(parseInt(formData.number_of_posts)) || parseInt(formData.number_of_posts) <= 0) {
+        Alert.alert('Error', 'Number of posts must be a positive number');
+        return;
+      }
+
+      const commonData = {
+        email: formData.email,
+        google_drive_link: formData.google_drive_link,
+        sch_start_range: formData.sch_start_range,
+        sch_end_range: formData.sch_end_range,
+        number_of_posts: parseInt(formData.number_of_posts),
+        posts_left: parseInt(formData.number_of_posts),
+        token_sesson: "{}",
+        google_drive_token: "{}",
+      };
+
+      switch (modalType) {
+        case 'instagram':
+          if (!formData.username || !formData.passwand || !formData.email) {
+            Alert.alert('Error', 'Please fill in all required fields (Username, Password, Email)');
+            return;
+          }
+          await ApiService.addInstagramAccount({
+            username: formData.username,
+            passwand: formData.passwand,
+            password: formData.passwand,
+            ...commonData,
+          } as any);
+          Alert.alert('Success', 'Instagram account added successfully!');
+          break;
+
+        case 'telegram':
+          if (!formData.channel_name || !formData.email) {
+            Alert.alert('Error', 'Please fill in all required fields (Channel Name, Email)');
+            return;
+          }
+          await ApiService.addTelegramAccount({
+            channel_name: formData.channel_name,
+            ...commonData,
+          });
+          Alert.alert('Success', 'Telegram channel added successfully!');
+          break;
+
+        case 'youtube':
+          if (!formData.username || !formData.channel_id || !formData.email) {
+            Alert.alert('Error', 'Please fill in all required fields (Channel Name, Channel ID, Email)');
+            return;
+          }
+          await ApiService.addYouTubeAccount({
+            username: formData.username,
+            channel_id: formData.channel_id,
+            ...commonData,
+          });
+          Alert.alert('Success', 'YouTube channel added successfully!');
+          break;
+      }
+
+      setModalVisible(false);
+      await loadDashboardData();
+    } catch (error: any) {
+      console.error('Add account error:', error.response?.data || error.message);
+      Alert.alert('Error', error.response?.data?.error || error.message || 'Failed to add account');
+    }
+  };
+
+  // Get greeting based on time of day
+  const getGreeting = () => {
+    const hour = new Date().getHours();
+    if (hour >= 5 && hour < 12) return 'Good Morning';
+    if (hour >= 12 && hour < 17) return 'Good Afternoon';
+    return 'Good Evening';
+  };
+
+  // Get formatted date (without time)
+  const getFormattedDate = () => {
+    const date = new Date();
+    return date.toLocaleDateString('en-US', {
+      weekday: 'long',
+      month: 'long',
+      day: 'numeric',
+      timeZone: 'Asia/Kolkata', // IST
+    });
+  };
+
+  return (
+    <View style={styles.container}>
+      <ScrollView
+        style={styles.scrollView}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+      >
+        <View style={styles.header}>
+          <Text style={styles.welcomeText}>
+            {getGreeting()}, {user?.Name || 'User'}
+          </Text>
+          <Text style={styles.dateText}>{getFormattedDate()}</Text>
+        </View>
+
+        <View style={styles.statsContainer}>
+          <Text style={styles.sectionTitle}>Today's Overview</Text>
+          
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            style={styles.statsGrid}
+            contentContainerStyle={styles.statsGridContent}
+          >
+            <StatCard
+              title="Total Accounts"
+              value={stats.totalAccounts}
+              color="#070840ff"
+            />
+            <StatCard
+              title="Active Schedules"
+              value={stats.activeSchedules}
+              color="#070840ff"
+            />
+            <StatCard
+              title="Posts Today"
+              value={stats.postsToday}
+              color="#070840ff"
+            />
+            <StatCard
+              title="Instagram Accounts"
+              value={stats.instagramAccounts}
+              color="#070840ff"
+            />
+            <StatCard
+              title="Telegram Accounts"
+              value={stats.telegramAccounts}
+              color="#070840ff"
+            />
+          </ScrollView>
+        </View>
+
+        <View style={styles.quickActions}>
+          <Text style={styles.sectionTitle}>Quick Actions</Text>
+          
+          <TouchableOpacity style={styles.actionButton} onPress={() => openAddModal('instagram')}>
+            <FontAwesome name="instagram" size={20} color="#E4405F" style={styles.icon} />
+            <Text style={styles.actionButtonText}>Add Instagram Accounts</Text>
+          </TouchableOpacity>
+          
+          <TouchableOpacity style={styles.actionButton} onPress={() => openAddModal('telegram')}>
+            <FontAwesome name="telegram" size={20} color="#0088cc" style={styles.icon} />
+            <Text style={styles.actionButtonText}>Add Telegram Channels</Text>
+          </TouchableOpacity>
+          
+          <TouchableOpacity style={styles.actionButton} onPress={() => navigation.navigate('Schedule')}>
+            <MaterialIcons name="calendar-month" size={20} color="#104d29ff" style={styles.icon} />
+            <Text style={styles.actionButtonText}>Update Schedules</Text>
+          </TouchableOpacity>
+          
+          <TouchableOpacity style={styles.actionButton} onPress={() => navigation.navigate('Upload')}>
+            <MaterialIcons name="file-upload" size={20} color="#782d85ff" style={styles.icon} />
+            <Text style={styles.actionButtonText}>Upload Media</Text>
+          </TouchableOpacity>
+          
+          <TouchableOpacity style={styles.actionButton} onPress={() => openAddModal('youtube')}>
+            <FontAwesome name="youtube" size={20} color="#d32121ff" style={styles.icon} />
+            <Text style={styles.actionButtonText}>Add YouTube Channels</Text>
+          </TouchableOpacity>
+        </View>
+      </ScrollView>
+
+      {/* New Circular Upload Form Button at Bottom Left */}
+      <TouchableOpacity style={styles.uploadButton} onPress={handleUploadForm}>
+        <Text style={styles.uploadButtonText}>+</Text>
+      </TouchableOpacity>
+
+      <Modal
+        animationType="slide"
+        transparent={true}
+        visible={modalVisible}
+        onRequestClose={() => setModalVisible(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <Text style={styles.modalTitle}>
+              Add {
+                modalType === 'instagram' ? 'Instagram Account' :
+                modalType === 'telegram' ? 'Telegram Channel' :
+                'YouTube Channel'
+              }
+            </Text>
+            <ScrollView style={styles.modalForm}>
+              {modalType === 'instagram' && (
+                <>
+                  <TextInput
+                    style={styles.input}
+                    value={formData.username}
+                    onChangeText={(text) => setFormData({ ...formData, username: text })}
+                    placeholder="Username *"
+                  />
+                  <TextInput
+                    style={styles.input}
+                    value={formData.passwand}
+                    onChangeText={(text) => setFormData({ ...formData, passwand: text })}
+                    placeholder="Password *"
+                    secureTextEntry
+                  />
+                </>
+              )}
+
+              {modalType === 'telegram' && (
+                <>
+                  <TextInput
+                    style={styles.input}
+                    value={formData.channel_name}
+                    onChangeText={(text) => setFormData({ ...formData, channel_name: text })}
+                    placeholder="Channel Name *"
+                  />
+                </>
+              )}
+
+              {modalType === 'youtube' && (
+                <>
+                  <TextInput
+                    style={styles.input}
+                    value={formData.username}
+                    onChangeText={(text) => setFormData({ ...formData, username: text })}
+                    placeholder="Channel Name *"
+                  />
+                  <TextInput
+                    style={styles.input}
+                    value={formData.channel_id}
+                    onChangeText={(text) => setFormData({ ...formData, channel_id: text })}
+                    placeholder="Channel ID * (e.g., UC8sAvgYCMM7r_pVsiBkC5kw)"
+                  />
+                </>
+              )}
+
+              <TextInput
+                style={styles.input}
+                value={formData.email}
+                onChangeText={(text) => setFormData({ ...formData, email: text })}
+                placeholder="Email *"
+                keyboardType="email-address"
+                autoCapitalize="none"
+              />
+
+              <TextInput
+                style={styles.input}
+                value={formData.google_drive_link}
+                onChangeText={(text) => setFormData({ ...formData, google_drive_link: text })}
+                placeholder="Google Drive Folder Link"
+                autoCapitalize="none"
+              />
+
+              <View style={styles.timeContainer}>
+                <View style={styles.timeInput}>
+                  <TextInput
+                    style={styles.input}
+                    value={formData.sch_start_range}
+                    onChangeText={(text) => setFormData({ ...formData, sch_start_range: text })}
+                    placeholder="Start Time (HH:MM:SS) *"
+                  />
+                </View>
+                <View style={styles.timeInput}>
+                  <TextInput
+                    style={styles.input}
+                    value={formData.sch_end_range}
+                    onChangeText={(text) => setFormData({ ...formData, sch_end_range: text })}
+                    placeholder="End Time (HH:MM:SS) *"
+                  />
+                </View>
+              </View>
+
+              <TextInput
+                style={styles.input}
+                value={formData.number_of_posts}
+                onChangeText={(text) => setFormData({ ...formData, number_of_posts: text })}
+                placeholder="Number of Posts *"
+                keyboardType="numeric"
+              />
+            </ScrollView>
+            <View style={styles.modalActions}>
+              <TouchableOpacity style={styles.cancelButton} onPress={() => setModalVisible(false)}>
+                <Text style={styles.cancelButtonText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.saveButton} onPress={handleAddAccount}>
+                <Text style={styles.saveButtonText}>Save</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+    </View>
+  );
+};
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: '#b4c5d8',
+  },
+  scrollView: {
+    flex: 1,
+  },
+  header: {
+    backgroundColor: '#fff',
+    padding: 20,
+    paddingBottom: 10,
+    marginBottom: 5,
+    borderBottomWidth: 0.5,
+    borderBottomColor: '#ddd',
+  },
+  welcomeText: {
+    fontSize: 28,
+    fontWeight: '500',
+    fontFamily: 'Times New Roman',
+    color: '#03021eff',
+    textAlign: 'left',
+  },
+  dateText: {
+    fontSize: 16,
+    color: '#666',
+    textAlign: 'left',
+    marginTop: 5,
+    fontStyle: 'italic',
+  },
+  statsContainer: {
+    padding: 10,
+    paddingTop: 15,
+  },
+  sectionTitle: {
+    fontSize: 32,
+    fontFamily: 'Times New Roman',
+    fontWeight: 'bold',
+    color: '#fff',
+    marginBottom: 10,
+  },
+  statsGrid: {
+    flexDirection: 'row',
+  },
+  statsGridContent: {
+    paddingVertical: 5,
+  },
+  statCard: {
+    backgroundColor: '#ffffffdd',
+    padding: 12,
+    borderRadius: 12,
+    width: 100,
+    borderLeftWidth: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.03,
+    shadowRadius: 4,
+    elevation: 5,
+    marginHorizontal: 5,
+    alignItems: 'center',
+  },
+  statValue: {
+    fontSize: 22,
+    fontWeight: 'bold',
+    color: '#333',
+    textAlign: 'center',
+  },
+  statTitle: {
+    fontSize: 14,
+    color: '#343232ff',
+    fontFamily: 'Times New Roman',
+    textAlign: 'center',
+    marginTop: 2,
+  },
+  quickActions: {
+    padding: 15,
+    paddingTop: 30,
+  },
+  actionButton: {
+    backgroundColor: '#fff',
+    padding: 10,
+    borderRadius: 8,
+    marginBottom: 8,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.03,
+    shadowRadius: 2,
+    elevation: 2,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  actionButtonText: {
+    fontSize: 15,
+    fontFamily: 'Times New Roman',
+    color: '#333',
+    fontWeight: '500',
+    marginLeft: 10,
+  },
+  icon: {
+    marginRight: 8,
+  },
+  uploadButton: {
+    position: 'absolute',
+    bottom: 20,
+    left: 20,
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    backgroundColor: '#fff',
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.03,
+    shadowRadius: 2,
+    elevation: 2,
+  },
+  uploadButtonText: {
+    fontSize: 30,
+    fontFamily: 'Times New Roman',
+    color: '#333',
+    fontWeight: '800',
+    textAlign: 'center',
+    lineHeight: 30,
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  modalContent: {
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    padding: 20,
+    width: '90%',
+    maxHeight: '80%',
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#333',
+    marginBottom: 16,
+    textAlign: 'center',
+  },
+  modalForm: {
+    maxHeight: 400,
+  },
+  input: {
+    borderWidth: 1,
+    borderColor: '#ddd',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    fontSize: 14,
+    marginBottom: 12,
+    backgroundColor: '#fff',
+  },
+  timeContainer: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  timeInput: {
+    flex: 1,
+  },
+  modalActions: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginTop: 16,
+    gap: 10,
+  },
+  cancelButton: {
+    backgroundColor: '#ccc',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderRadius: 8,
+    flex: 1,
+  },
+  cancelButtonText: {
+    color: '#333',
+    textAlign: 'center',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  saveButton: {
+    backgroundColor: '#007AFF',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderRadius: 8,
+    flex: 1,
+  },
+  saveButtonText: {
+    color: '#fff',
+    textAlign: 'center',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+});
+
+
+
+
+
+
+
+
+
+
+export default DashboardScreen;

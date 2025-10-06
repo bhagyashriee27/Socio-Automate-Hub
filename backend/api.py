@@ -1587,7 +1587,7 @@ def add_youtube():
             query = """
                 UPDATE youtube SET 
                     token_sesson = %s,
-                    token_drive = %s,
+                    
                     email = %s,
                     channel_id = %s,
                     google_drive_link = %s,
@@ -1602,7 +1602,7 @@ def add_youtube():
                 WHERE id = %s
             """
             cursor.execute(query, (
-                token_sesson, token_drive, email, channel_id, google_drive_link, 
+                token_sesson, email, channel_id, google_drive_link, 
                 sch_start_range, sch_end_range, number_of_posts, number_of_posts, 
                 existing[0]
             ))
@@ -1612,7 +1612,7 @@ def add_youtube():
             # Insert new record
             query = """
                 INSERT INTO youtube (
-                    user_id, username, token_sesson, token_drive, email, channel_id, google_drive_link,
+                    user_id, username, token_sesson, email, channel_id, google_drive_link,
                     sch_start_range, sch_end_range, sch_date, sch_time,
                     number_of_posts, posts_left, selected, done, schedule_type
                 ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'No', 'No', 'range')
@@ -1620,7 +1620,7 @@ def add_youtube():
             sch_date = datetime.now(TIMEZONE).strftime('%Y-%m-%d')
             sch_time = '12:00:00'
             cursor.execute(query, (
-                user_id, username, token_sesson, token_drive, email, channel_id, google_drive_link,
+                user_id, username, token_sesson, email, channel_id, google_drive_link,
                 sch_start_range, sch_end_range, sch_date, sch_time,
                 number_of_posts, number_of_posts
             ))

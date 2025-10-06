@@ -12,7 +12,7 @@ import {
   ApiResponse,
 } from '../types';
 
-const BASE_URL = 'https://monitor-renewing-oarfish.ngrok-free.app'; 
+const BASE_URL = 'https://credible-mastodon-fully.ngrok-free.app'; 
 
 const api = axios.create({
   baseURL: BASE_URL,
