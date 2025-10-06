@@ -1541,14 +1541,13 @@ def add_facebook():
     
 @app.route('/youtube', methods=['POST'])
 def add_youtube():
-    """Add or update a YouTube channel for a user."""
+    """Add or update a YouTube channel for a user using google_drive_link for Drive integration."""
     data = request.get_json()
     email = data.get('email')
     username = data.get('username')
-    token_sesson = data.get('token_sesson', "{}")  # Default to empty JSON
-    token_drive = data.get('token_drive', "{}")    # Add token_drive field
+    token_sesson = data.get('token_sesson', "{}")  # Default to empty JSON for session token
     channel_id = data.get('channel_id')
-    google_drive_link = data.get('google_drive_link')
+    google_drive_link = data.get('google_drive_link')  # Use database column name
     sch_start_range = data.get('sch_start_range', '09:00:00')
     sch_end_range = data.get('sch_end_range', '17:00:00')
     number_of_posts = data.get('number_of_posts', 0)
@@ -1587,10 +1586,9 @@ def add_youtube():
             query = """
                 UPDATE youtube SET 
                     token_sesson = %s,
-                    
                     email = %s,
                     channel_id = %s,
-                    google_drive_link = %s,
+                    google_drive_link = %s,  -- Ensure this matches the database
                     sch_start_range = %s,
                     sch_end_range = %s,
                     number_of_posts = %s,
@@ -1602,8 +1600,8 @@ def add_youtube():
                 WHERE id = %s
             """
             cursor.execute(query, (
-                token_sesson, email, channel_id, google_drive_link, 
-                sch_start_range, sch_end_range, number_of_posts, number_of_posts, 
+                token_sesson, email, channel_id, google_drive_link,
+                sch_start_range, sch_end_range, number_of_posts, number_of_posts,
                 existing[0]
             ))
             record_id = existing[0]
@@ -1615,7 +1613,7 @@ def add_youtube():
                     user_id, username, token_sesson, email, channel_id, google_drive_link,
                     sch_start_range, sch_end_range, sch_date, sch_time,
                     number_of_posts, posts_left, selected, done, schedule_type
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'No', 'No', 'range')
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'No', 'No', 'range')
             """
             sch_date = datetime.now(TIMEZONE).strftime('%Y-%m-%d')
             sch_time = '12:00:00'
@@ -1633,8 +1631,7 @@ def add_youtube():
         return jsonify({"message": f"YouTube channel {action} successfully", "record_id": record_id}), 200
     except mysql.connector.Error as e:
         conn.close()
-        return jsonify({"error": f"Database error: {str(e)}"}), 500
-    
+        return jsonify({"error": f"Database error: {str(e)}"}), 500    
     
 @app.route('/youtube/<int:record_id>', methods=['DELETE'])
 def delete_youtube(record_id):

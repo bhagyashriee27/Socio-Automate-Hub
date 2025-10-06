@@ -12,7 +12,8 @@
 *.mkv
 *.flv
 *.wmv
-
+*.xlsx
+*.xls
 # Credentials
 credentials.json
 /frontend/node_modules/credentials.json

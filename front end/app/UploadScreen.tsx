@@ -3,7 +3,6 @@ import {
   View,
   Text,
   StyleSheet,
-  ScrollView,
   TouchableOpacity,
   Alert,
   Image,
@@ -13,7 +12,6 @@ import {
   Platform,
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
-import { Picker } from '@react-native-picker/picker';
 import ApiService from '../services/api';
 import StorageService from '../utils/storage';
 import { InstagramAccount, TelegramAccount, FacebookAccount, YouTubeAccount } from '../types';
@@ -36,7 +34,7 @@ const UploadScreen: React.FC = () => {
   const [uploading, setUploading] = useState(false);
   const [user, setUser] = useState<any>(null);
   const [modalVisible, setModalVisible] = useState(false);
-  const [uploadProgress, setUploadProgress] = useState<{[key: string]: number}>({});
+  const [uploadProgress, setUploadProgress] = useState<{ [key: string]: number }>({});
   const [accountSelectorVisible, setAccountSelectorVisible] = useState(false);
 
   useEffect(() => {
@@ -62,7 +60,6 @@ const UploadScreen: React.FC = () => {
   const loadAccounts = async () => {
     try {
       const response = await ApiService.getUser(user.Id);
-      
       let platformAccounts: any[] = [];
       switch (platform) {
         case 'instagram':
@@ -75,9 +72,8 @@ const UploadScreen: React.FC = () => {
           platformAccounts = response.youtube_channels || [];
           break;
       }
-      
       setAccounts(platformAccounts);
-      setSelectedAccounts([]); // Reset selected accounts when platform changes
+      setSelectedAccounts([]); // Reset selected accounts on platform change
     } catch (error: any) {
       console.error('Error loading accounts:', error);
       Alert.alert('Error', 'Failed to load accounts');
@@ -87,13 +83,12 @@ const UploadScreen: React.FC = () => {
   const pickMultipleMedia = async (mediaType: 'images' | 'videos' | 'all') => {
     try {
       const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-      
       if (status !== 'granted') {
         Alert.alert('Permission required', 'Sorry, we need camera roll permissions to make this work!');
         return;
       }
 
-      const mediaTypes = mediaType === 'images' 
+      const mediaTypes = mediaType === 'images'
         ? ImagePicker.MediaTypeOptions.Images
         : mediaType === 'videos'
         ? ImagePicker.MediaTypeOptions.Videos
@@ -115,7 +110,6 @@ const UploadScreen: React.FC = () => {
           status: 'pending',
           selected: true,
         }));
-
         setSelectedMedia(prev => [...prev, ...newMedia]);
       }
     } catch (error) {
@@ -125,25 +119,19 @@ const UploadScreen: React.FC = () => {
   };
 
   const toggleMediaSelection = (mediaId: string) => {
-    setSelectedMedia(prev => 
-      prev.map(media => 
-        media.id === mediaId 
-          ? { ...media, selected: !media.selected }
-          : media
+    setSelectedMedia(prev =>
+      prev.map(media =>
+        media.id === mediaId ? { ...media, selected: !media.selected } : media
       )
     );
   };
 
   const selectAllMedia = () => {
-    setSelectedMedia(prev => 
-      prev.map(media => ({ ...media, selected: true }))
-    );
+    setSelectedMedia(prev => prev.map(media => ({ ...media, selected: true })));
   };
 
   const deselectAllMedia = () => {
-    setSelectedMedia(prev => 
-      prev.map(media => ({ ...media, selected: false }))
-    );
+    setSelectedMedia(prev => prev.map(media => ({ ...media, selected: false })));
   };
 
   const removeMedia = (mediaId: string) => {
@@ -177,7 +165,7 @@ const UploadScreen: React.FC = () => {
     }
 
     setUploading(true);
-    setSelectedMedia(prev => prev.map(media => 
+    setSelectedMedia(prev => prev.map(media =>
       media.selected ? { ...media, status: 'uploading' } : media
     ));
 
@@ -186,18 +174,14 @@ const UploadScreen: React.FC = () => {
 
     for (let i = 0; i < mediaToUpload.length; i++) {
       const media = mediaToUpload[i];
-      
       try {
-        // Upload to each selected account
         for (const accountId of selectedAccounts) {
           const formData = new FormData();
-          
           formData.append('file', {
             uri: media.uri,
             type: media.type === 'image' ? 'image/jpeg' : 'video/mp4',
             name: media.name,
           } as any);
-
           formData.append('account_id', accountId);
           formData.append('platform', platform);
           formData.append('user_id', user.Id.toString());
@@ -211,7 +195,7 @@ const UploadScreen: React.FC = () => {
 
           console.log(`Uploading file: ${media.name} to account ${accountId}`);
           const response = await ApiService.uploadMedia(formData);
-          
+
           clearInterval(progressInterval);
           setUploadProgress(prev => ({ ...prev, [media.id]: 100 }));
 
@@ -223,22 +207,17 @@ const UploadScreen: React.FC = () => {
 
           await new Promise(resolve => setTimeout(resolve, 500));
         }
-
-        setSelectedMedia(prev => 
+        setSelectedMedia(prev =>
           prev.map(m => m.id === media.id ? { ...m, status: 'completed' } : m)
         );
         successfulUploads++;
-
       } catch (error: any) {
         console.error(`❌ Upload failed for ${media.name}:`, error);
-        setSelectedMedia(prev => 
+        setSelectedMedia(prev =>
           prev.map(m => m.id === media.id ? { ...m, status: 'failed' } : m)
         );
         failedUploads++;
-        
-        if (error.response) {
-          console.error('Error response:', error.response.data);
-        }
+        if (error.response) console.error('Error response:', error.response.data);
         console.error('Error message:', error.message);
       }
     }
@@ -248,12 +227,10 @@ const UploadScreen: React.FC = () => {
     if (successfulUploads > 0 && failedUploads === 0) {
       Alert.alert('Success', `All ${successfulUploads} files uploaded successfully to selected accounts!`);
       setSelectedMedia(prev => prev.filter(media => media.status !== 'completed'));
-      if (getSelectedMedia().length === 0) {
-        setModalVisible(false);
-      }
+      if (getSelectedMedia().length === 0) setModalVisible(false);
     } else if (successfulUploads > 0) {
       Alert.alert(
-        'Upload Complete', 
+        'Upload Complete',
         `${successfulUploads} files uploaded successfully, ${failedUploads} failed.`,
         [{ text: 'OK' }]
       );
@@ -265,21 +242,16 @@ const UploadScreen: React.FC = () => {
 
   const getSelectedAccountNames = () => {
     if (selectedAccounts.length === 0) return 'No accounts selected';
-    
     const selected = accounts.filter(acc => selectedAccounts.includes(acc.id.toString()));
     return selected.map(acc => getAccountDisplayName(acc)).join(', ');
   };
 
   const getAccountDisplayName = (account: any) => {
     switch (platform) {
-      case 'instagram':
-        return account.username;
-      case 'telegram':
-        return account.channel_name;
-      case 'youtube':
-        return account.username;
-      default:
-        return 'Unknown';
+      case 'instagram': return account.username;
+      case 'telegram': return account.channel_name;
+      case 'youtube': return account.username;
+      default: return 'Unknown';
     }
   };
 
@@ -311,22 +283,16 @@ const UploadScreen: React.FC = () => {
     }
   };
 
-  // Render account selection based on platform
   const renderAccountSelection = () => {
     if (accounts.length === 0) {
       return (
         <View style={styles.emptyState}>
-          <Text style={styles.emptyText}>
-            No {platform} accounts found
-          </Text>
-          <Text style={styles.emptySubtext}>
-            Please add an account first to upload media
-          </Text>
+          <Text style={styles.emptyText}>No {platform} accounts found</Text>
+          <Text style={styles.emptySubtext}>Please add an account first to upload media</Text>
         </View>
       );
     }
 
-    // Multi-select list for both Android and iOS
     return (
       <View style={styles.accountListContainer}>
         <FlatList
@@ -346,9 +312,7 @@ const UploadScreen: React.FC = () => {
               ]}>
                 {selectedAccounts.includes(item.id.toString()) && <Text style={styles.checkboxTick}>✓</Text>}
               </View>
-              <Text style={styles.accountItemText}>
-                {getAccountDisplayName(item)}
-              </Text>
+              <Text style={styles.accountItemText}>{getAccountDisplayName(item)}</Text>
             </TouchableOpacity>
           )}
         />
@@ -357,7 +321,7 @@ const UploadScreen: React.FC = () => {
   };
 
   const MediaItem = ({ item }: { item: MediaFile }) => (
-    <TouchableOpacity 
+    <TouchableOpacity
       style={[
         styles.mediaItem,
         item.selected && styles.mediaItemSelected,
@@ -373,7 +337,6 @@ const UploadScreen: React.FC = () => {
           {item.selected && <Text style={styles.checkboxTick}>✓</Text>}
         </View>
       </View>
-
       <View style={styles.mediaPreview}>
         {item.type === 'image' ? (
           <Image source={{ uri: item.uri }} style={styles.mediaThumbnail} />
@@ -383,35 +346,23 @@ const UploadScreen: React.FC = () => {
           </View>
         )}
       </View>
-      
       <View style={styles.mediaInfo}>
-        <Text style={styles.mediaName} numberOfLines={1}>
-          {item.name}
-        </Text>
+        <Text style={styles.mediaName} numberOfLines={1}>{item.name}</Text>
         <View style={styles.statusContainer}>
           <Text style={[styles.statusText, { color: getStatusColor(item.status) }]}>
             {getStatusIcon(item.status)} {item.status.charAt(0).toUpperCase() + item.status.slice(1)}
           </Text>
           {item.status === 'uploading' && uploadProgress[item.id] && (
-            <Text style={styles.progressText}>
-              {uploadProgress[item.id]}%
-            </Text>
+            <Text style={styles.progressText}>{uploadProgress[item.id]}%</Text>
           )}
         </View>
-        
         {item.status === 'uploading' && (
           <View style={styles.progressBar}>
-            <View 
-              style={[
-                styles.progressFill,
-                { width: `${uploadProgress[item.id] || 0}%` }
-              ]} 
-            />
+            <View style={[styles.progressFill, { width: `${uploadProgress[item.id] || 0}%` }]} />
           </View>
         )}
       </View>
-      
-      <TouchableOpacity 
+      <TouchableOpacity
         style={styles.removeMediaButton}
         onPress={() => removeMedia(item.id)}
         disabled={item.status === 'uploading'}
@@ -427,110 +378,87 @@ const UploadScreen: React.FC = () => {
 
   return (
     <View style={styles.container}>
-      <ScrollView style={styles.scrollView}>
-        <View style={styles.content}>
-          <Text style={styles.title}>Upload Media</Text>
-          
-          {/* Platform Selection */}
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Select Platform</Text>
-            <View style={styles.platformContainer}>
-              {['instagram', 'telegram', 'youtube'].map((plat) => (
-                <TouchableOpacity
-                  key={plat}
-                  style={[
-                    styles.platformButton,
-                    platform === plat && styles.platformButtonActive,
-                  ]}
-                  onPress={() => setPlatform(plat as any)}
-                >
-                  <Text style={[
-                    styles.platformButtonText,
-                    platform === plat && styles.platformButtonTextActive,
-                  ]}>
-                    {plat.charAt(0).toUpperCase() + plat.slice(1)}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-          </View>
-
-          {/* Account Selection */}
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Select Accounts (Multiple)</Text>
-            {renderAccountSelection()}
-          </View>
-
-          {/* Upload Stats & Button */}
-          <View style={styles.uploadSection}>
-            <View style={styles.statsContainer}>
-              <View style={styles.statItem}>
-                <Text style={styles.statNumber}>{totalMediaCount}</Text>
-                <Text style={styles.statLabel}>Total</Text>
-              </View>
-              <View style={styles.statItem}>
-                <Text style={styles.statNumber}>{selectedMediaCount}</Text>
-                <Text style={styles.statLabel}>Selected</Text>
-              </View>
-              <View style={styles.statItem}>
-                <Text style={styles.statNumber}>
-                  {selectedMedia.filter(m => m.status === 'completed').length}
+      <View style={styles.content}>
+        <Text style={styles.title}>Upload Media</Text>
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Select Platform</Text>
+          <View style={styles.platformContainer}>
+            {['instagram', 'telegram', 'youtube'].map((plat) => (
+              <TouchableOpacity
+                key={plat}
+                style={[
+                  styles.platformButton,
+                  platform === plat && styles.platformButtonActive,
+                ]}
+                onPress={() => setPlatform(plat as any)}
+              >
+                <Text style={[
+                  styles.platformButtonText,
+                  platform === plat && styles.platformButtonTextActive,
+                ]}>
+                  {plat.charAt(0).toUpperCase() + plat.slice(1)}
                 </Text>
-                <Text style={styles.statLabel}>Completed</Text>
-              </View>
-            </View>
-
-            <TouchableOpacity
-              style={[
-                styles.uploadButton,
-                !canOpenModal && styles.uploadButtonDisabled,
-              ]}
-              onPress={() => setModalVisible(true)}
-              disabled={!canOpenModal}
-            >
-              <Text style={styles.uploadButtonText}>
-                {totalMediaCount > 0 
-                  ? `Manage ${totalMediaCount} File${totalMediaCount > 1 ? 's' : ''}`
-                  : 'Select Media to Upload'
-                }
-              </Text>
-            </TouchableOpacity>
+              </TouchableOpacity>
+            ))}
           </View>
-
-          {/* Selected Accounts Info */}
-          {selectedAccounts.length > 0 && (
-            <View style={styles.accountInfo}>
-              <Text style={styles.accountInfoText}>
-                📝 Uploading to: {getSelectedAccountNames()}
-              </Text>
-              {totalMediaCount > 0 && (
-                <Text style={styles.mediaCountText}>
-                  📦 {selectedMediaCount}/{totalMediaCount} file{totalMediaCount > 1 ? 's' : ''} selected
-                </Text>
-              )}
-            </View>
-          )}
-
-          {/* Help Text */}
-          {selectedAccounts.length === 0 && accounts.length > 0 && (
-            <View style={styles.helpContainer}>
-              <Text style={styles.helpText}>
-                💡 Please select one or more accounts above to start uploading media
-              </Text>
-            </View>
-          )}
-
-          {accounts.length === 0 && (
-            <View style={styles.helpContainer}>
-              <Text style={styles.helpText}>
-                ⚠️ No {platform} accounts found. Please add accounts first.
-              </Text>
-            </View>
-          )}
         </View>
-      </ScrollView>
-
-      {/* Media Selection Modal */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Select Accounts (Multiple)</Text>
+          {renderAccountSelection()}
+        </View>
+        <View style={styles.uploadSection}>
+          <View style={styles.statsContainer}>
+            <View style={styles.statItem}>
+              <Text style={styles.statNumber}>{totalMediaCount}</Text>
+              <Text style={styles.statLabel}>Total</Text>
+            </View>
+            <View style={styles.statItem}>
+              <Text style={styles.statNumber}>{selectedMediaCount}</Text>
+              <Text style={styles.statLabel}>Selected</Text>
+            </View>
+            <View style={styles.statItem}>
+              <Text style={styles.statNumber}>
+                {selectedMedia.filter(m => m.status === 'completed').length}
+              </Text>
+              <Text style={styles.statLabel}>Completed</Text>
+            </View>
+          </View>
+          <TouchableOpacity
+            style={[
+              styles.uploadButton,
+              !canOpenModal && styles.uploadButtonDisabled,
+            ]}
+            onPress={() => setModalVisible(true)}
+            disabled={!canOpenModal}
+          >
+            <Text style={styles.uploadButtonText}>
+              {totalMediaCount > 0
+                ? `Manage ${totalMediaCount} File${totalMediaCount > 1 ? 's' : ''}`
+                : 'Select Media to Upload'}
+            </Text>
+          </TouchableOpacity>
+        </View>
+        {selectedAccounts.length > 0 && (
+          <View style={styles.accountInfo}>
+            <Text style={styles.accountInfoText}>📝 Uploading to: {getSelectedAccountNames()}</Text>
+            {totalMediaCount > 0 && (
+              <Text style={styles.mediaCountText}>
+                📦 {selectedMediaCount}/{totalMediaCount} file{totalMediaCount > 1 ? 's' : ''} selected
+              </Text>
+            )}
+          </View>
+        )}
+        {selectedAccounts.length === 0 && accounts.length > 0 && (
+          <View style={styles.helpContainer}>
+            <Text style={styles.helpText}>💡 Please select one or more accounts above to start uploading media</Text>
+          </View>
+        )}
+        {accounts.length === 0 && (
+          <View style={styles.helpContainer}>
+            <Text style={styles.helpText}>⚠️ No {platform} accounts found. Please add accounts first.</Text>
+          </View>
+        )}
+      </View>
       <Modal
         animationType="slide"
         transparent={true}
@@ -541,44 +469,34 @@ const UploadScreen: React.FC = () => {
           <View style={styles.modalContent}>
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>Upload Media</Text>
-              <Text style={styles.selectedAccount}>
-                To: {getSelectedAccountNames()}
-              </Text>
-              <Text style={styles.selectionInfo}>
-                {selectedMediaCount} of {totalMediaCount} selected
-              </Text>
+              <Text style={styles.selectedAccount}>To: {getSelectedAccountNames()}</Text>
+              <Text style={styles.selectionInfo}>{selectedMediaCount} of {totalMediaCount} selected</Text>
             </View>
-
-            {/* Selection Controls */}
             {totalMediaCount > 0 && (
               <View style={styles.selectionControls}>
-                <TouchableOpacity 
+                <TouchableOpacity
                   style={styles.selectionButton}
                   onPress={selectAllMedia}
                   disabled={uploading}
                 >
                   <Text style={styles.selectionButtonText}>Select All</Text>
                 </TouchableOpacity>
-                <TouchableOpacity 
+                <TouchableOpacity
                   style={styles.selectionButton}
                   onPress={deselectAllMedia}
                   disabled={uploading}
                 >
                   <Text style={styles.selectionButtonText}>Deselect All</Text>
                 </TouchableOpacity>
-                <TouchableOpacity 
+                <TouchableOpacity
                   style={styles.selectionButton}
                   onPress={clearAllMedia}
                   disabled={uploading}
                 >
-                  <Text style={[styles.selectionButtonText, styles.clearAllText]}>
-                    Clear All
-                  </Text>
+                  <Text style={[styles.selectionButtonText, styles.clearAllText]}>Clear All</Text>
                 </TouchableOpacity>
               </View>
             )}
-
-            {/* Selected Media List */}
             {totalMediaCount > 0 ? (
               <View style={styles.mediaListContainer}>
                 <FlatList
@@ -587,47 +505,42 @@ const UploadScreen: React.FC = () => {
                   keyExtractor={item => item.id}
                   style={styles.mediaList}
                   contentContainerStyle={styles.mediaListContent}
+                  initialNumToRender={10}
+                  maxToRenderPerBatch={10}
+                  windowSize={5}
                 />
               </View>
             ) : (
               <View style={styles.noMediaContainer}>
                 <Text style={styles.noMediaText}>No media selected</Text>
-                <Text style={styles.noMediaSubtext}>
-                  Choose images or videos to upload using the buttons below
-                </Text>
+                <Text style={styles.noMediaSubtext}>Choose images or videos to upload using the buttons below</Text>
               </View>
             )}
-
-            {/* Media Selection Buttons */}
             <View style={styles.mediaButtons}>
-              <TouchableOpacity 
-                style={styles.mediaButton} 
+              <TouchableOpacity
+                style={styles.mediaButton}
                 onPress={() => pickMultipleMedia('images')}
                 disabled={uploading}
               >
                 <Text style={styles.mediaButtonText}>📸 Select Images</Text>
               </TouchableOpacity>
-              
-              <TouchableOpacity 
-                style={styles.mediaButton} 
+              <TouchableOpacity
+                style={styles.mediaButton}
                 onPress={() => pickMultipleMedia('videos')}
                 disabled={uploading}
               >
                 <Text style={styles.mediaButtonText}>🎥 Select Videos</Text>
               </TouchableOpacity>
-              
-              <TouchableOpacity 
-                style={styles.mediaButton} 
+              <TouchableOpacity
+                style={styles.mediaButton}
                 onPress={() => pickMultipleMedia('all')}
                 disabled={uploading}
               >
                 <Text style={styles.mediaButtonText}>📁 Select Both</Text>
               </TouchableOpacity>
             </View>
-
-            {/* Action Buttons */}
             <View style={styles.actionButtons}>
-              <TouchableOpacity 
+              <TouchableOpacity
                 style={styles.cancelButton}
                 onPress={() => setModalVisible(false)}
                 disabled={uploading}
@@ -636,7 +549,6 @@ const UploadScreen: React.FC = () => {
                   {uploading ? 'Cancel Upload' : 'Close'}
                 </Text>
               </TouchableOpacity>
-              
               <TouchableOpacity
                 style={[
                   styles.uploadModalButton,
@@ -653,9 +565,7 @@ const UploadScreen: React.FC = () => {
                     </Text>
                   </View>
                 ) : (
-                  <Text style={styles.uploadModalButtonText}>
-                    Upload Selected ({selectedMediaCount})
-                  </Text>
+                  <Text style={styles.uploadModalButtonText}>Upload Selected ({selectedMediaCount})</Text>
                 )}
               </TouchableOpacity>
             </View>
@@ -670,9 +580,6 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#f5f5f5',
-  },
-  scrollView: {
-    flex: 1,
   },
   content: {
     padding: 20,
@@ -1058,4 +965,4 @@ const styles = StyleSheet.create({
   },
 });
 
-export default UploadScreen;
+export default UploadScreen; 

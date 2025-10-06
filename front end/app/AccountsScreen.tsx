@@ -94,13 +94,12 @@ const AccountsScreen: React.FC = () => {
 
       const commonData = {
         email: formData.email,
-        google_drive_link: formData.google_drive_link,
+        google_drive_link: formData.google_drive_link, // Use the correct database column name
         sch_start_range: formData.sch_start_range,
         sch_end_range: formData.sch_end_range,
         number_of_posts: parseInt(formData.number_of_posts),
         posts_left: parseInt(formData.number_of_posts),
-        token_sesson: "{}",
-        google_drive_token: "{}",
+        token_sesson: "{}", // Matches backend expectation
       };
 
       switch (modalType) {
