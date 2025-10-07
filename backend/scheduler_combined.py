@@ -104,7 +104,7 @@ def calculate_initial_schedule(now, start_time, end_time, posts_left):
 # --- Main Logic ---
 def run_scheduler_once():
     """
-    Combined scheduler for Instagram and Telegram.
+    Combined scheduler for Instagram, Telegram, and YouTube.
     Fixed next_post_time calculation to prevent time creep.
     """
     conn = get_db_connection()
@@ -120,8 +120,8 @@ def run_scheduler_once():
     
     print(f"\n--- Running Combined Scheduler at {now.strftime('%Y-%m-%d %H:%M:%S %Z')} ---")
 
-    # Process both platforms
-    platforms = ['instagram', 'telegram']
+    # Process all platforms
+    platforms = ['instagram', 'telegram', 'youtube']
     
     for platform in platforms:
         print(f"\nProcessing platform: {platform}")
@@ -236,32 +236,76 @@ def run_scheduler_once():
     # Check for scheduled posts and trigger appropriate workers
     instagram_time = get_earliest_post_time('instagram')
     telegram_time = get_earliest_post_time('telegram')
+    youtube_time = get_earliest_post_time('youtube')
 
     print("Checking earliest post times:")
     print(f"  Instagram: {instagram_time.strftime('%Y-%m-%d %H:%M:%S %Z') if instagram_time else 'No scheduled posts'}")
     print(f"  Telegram: {telegram_time.strftime('%Y-%m-%d %H:%M:%S %Z') if telegram_time else 'No scheduled posts'}")
+    print(f"  YouTube: {youtube_time.strftime('%Y-%m-%d %H:%M:%S %Z') if youtube_time else 'No scheduled posts'}")
 
     # Determine which worker to run based on earliest post
-    if not instagram_time and not telegram_time:
-        print("No posts scheduled for either platform.")
-        print("Starting both workers to check for immediate posts...")
+    if not instagram_time and not telegram_time and not youtube_time:
+        print("No posts scheduled for any platform.")
+        print("Starting all workers to check for immediate posts...")
         sleep(2)
+        # Start Instagram worker
         subprocess.run(["python", os.path.join(os.path.dirname(__file__), "post_reel_loop.py")], check=False)
+        # Start Telegram worker  
         subprocess.run(["python", os.path.join(os.path.dirname(__file__), "post_on_telegram.py")], check=False)
+        # Start YouTube worker
+        subprocess.run(["python", os.path.join(os.path.dirname(__file__), "post_on_youtube.py")], check=False)
     else:
         # Convert to aware datetimes for comparison
         instagram_time_aware = make_aware(instagram_time) if instagram_time else None
         telegram_time_aware = make_aware(telegram_time) if telegram_time else None
+        youtube_time_aware = make_aware(youtube_time) if youtube_time else None
+        
+        # Find the earliest post time among all platforms
+        earliest_time = None
+        earliest_platform = None
+        
+        for platform, time_aware in [
+            ('instagram', instagram_time_aware),
+            ('telegram', telegram_time_aware),
+            ('youtube', youtube_time_aware)
+        ]:
+            if time_aware and (earliest_time is None or time_aware < earliest_time):
+                earliest_time = time_aware
+                earliest_platform = platform
         
         # Run the worker for the platform with the earliest post
-        if instagram_time_aware and (not telegram_time_aware or instagram_time_aware <= telegram_time_aware):
+        if earliest_platform == 'instagram':
             print("Running Instagram worker (earliest post)...")
             sleep(2)
             subprocess.run(["python", os.path.join(os.path.dirname(__file__), "post_reel_loop.py")], check=False)
-        else:
+        elif earliest_platform == 'telegram':
             print("Running Telegram worker (earliest post)...")
             sleep(2)
             subprocess.run(["python", os.path.join(os.path.dirname(__file__), "post_on_telegram.py")], check=False)
+        elif earliest_platform == 'youtube':
+            print("Running YouTube worker (earliest post)...")
+            sleep(2)
+            subprocess.run(["python", os.path.join(os.path.dirname(__file__), "post_on_youtube.py")], check=False)
+
+def run_continuous_scheduler():
+    """Run the scheduler continuously with error handling."""
+    print("🚀 Starting Combined Scheduler Service (Instagram + Telegram + YouTube)")
+    print("⏰ Timezone: Asia/Kolkata")
+    print("🔄 Running every 30 seconds...")
+    print("Press Ctrl+C to stop\n")
+    
+    while True:
+        try:
+            run_scheduler_once()
+            print(f"⏰ Next check in 30 seconds... ({datetime.now(TIMEZONE).strftime('%H:%M:%S')})")
+            sleep(30)
+        except KeyboardInterrupt:
+            print("\n\n🛑 Scheduler stopped by user")
+            break
+        except Exception as e:
+            print(f"❌ Unexpected error in scheduler: {str(e)}")
+            print("🔄 Restarting scheduler in 30 seconds...")
+            sleep(30)
 
 if __name__ == "__main__":
-    run_scheduler_once()
+    run_continuous_scheduler()
