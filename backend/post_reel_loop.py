@@ -8,7 +8,6 @@ from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseDownload
 import io
-import random
 from datetime import datetime, timedelta
 import pytz
 from instagrapi import Client
@@ -21,12 +20,10 @@ from dotenv import load_dotenv
 # Load environment variables from .env file
 load_dotenv()
 
-
 # --- Configuration ---
 TEMP_FOLDER = "temp_downloads"
 CAPTION_FILE = "long_vid_caption.txt"
 SCOPES = ["https://www.googleapis.com/auth/drive"]
-
 
 # Database configuration from environment variables
 DB_CONFIG = {
@@ -41,7 +38,6 @@ IDLE_SLEEP_MINUTES = 0.3  # How long to wait if no accounts are scheduled
 RESCHEDULE_THRESHOLD_MINUTES = 15  # If wait time exceeds this, run scheduler and restart
 
 over_time = 1
-
 
 # In-memory cache for credentials to avoid redundant database queries
 _credentials_cache = {}
@@ -245,11 +241,12 @@ def download_from_drive(file_id, local_path, creds):
         status, done = downloader.next_chunk()
     print(f"Downloaded {file_id} to {local_path}")
 
-def get_media_files(creds, account):
+def get_oldest_media_file(creds, account):
+    """Get the oldest media file from Google Drive based on creation time."""
     drive_service = build('drive', 'v3', credentials=creds)
     conn = get_db_connection()
     if not conn:
-        return {'images': [], 'videos': []}
+        return None, None, None
     cursor = conn.cursor()
     cursor.execute("SELECT google_drive_link FROM instagram WHERE id = %s", (account['id'],))
     drive_link = cursor.fetchone()[0]
@@ -258,6 +255,7 @@ def get_media_files(creds, account):
 
     folder_id = extract_folder_id(drive_link)
     username = account['username']
+    
     if drive_link and folder_id:
         try:
             drive_service.files().get(fileId=folder_id, fields='id').execute()
@@ -267,7 +265,7 @@ def get_media_files(creds, account):
             folder_id, folder_link = create_instagram_feed_folder(creds, username)
             conn = get_db_connection()
             if not conn:
-                return {'images': [], 'videos': []}
+                return None, None, None
             cursor = conn.cursor()
             cursor.execute("UPDATE instagram SET google_drive_link = %s WHERE id = %s", (folder_link, account['id']))
             conn.commit()
@@ -278,7 +276,7 @@ def get_media_files(creds, account):
         folder_id, folder_link = create_instagram_feed_folder(creds, username)
         conn = get_db_connection()
         if not conn:
-            return {'images': [], 'videos': []}
+            return None, None, None
         cursor = conn.cursor()
         cursor.execute("UPDATE instagram SET google_drive_link = %s WHERE id = %s", (folder_link, account['id']))
         conn.commit()
@@ -287,23 +285,45 @@ def get_media_files(creds, account):
         print(f"Updated Google Drive link for account {username}: {folder_link}")
 
     query = f"'{folder_id}' in parents"
-    results = drive_service.files().list(q=query, fields="files(id, name, mimeType)").execute()
+    results = drive_service.files().list(
+        q=query, 
+        fields="files(id, name, mimeType, createdTime)",
+        orderBy="createdTime"  # Get files ordered by creation time (oldest first)
+    ).execute()
     files = results.get('files', [])
 
-    media_files = {'images': [], 'videos': []}
     if not files:
         print(f"ERROR: No media files found in folder {folder_id}")
-        return media_files
+        return None, None, None
 
+    # Filter for media files and get the oldest one
+    oldest_file = None
     for file in files:
         if file['mimeType'].startswith('image/') or file['mimeType'].startswith('video/'):
-            local_path = os.path.join(TEMP_FOLDER, file['name'])
-            download_from_drive(file['id'], local_path, creds)
-            if file['mimeType'].startswith('image/'):
-                media_files['images'].append(local_path)
-            elif file['mimeType'].startswith('video/'):
-                media_files['videos'].append(local_path)
-    return media_files
+            oldest_file = file
+            break  # Since files are sorted by creation time, first media file is oldest
+
+    if not oldest_file:
+        print(f"ERROR: No valid media files found in folder {folder_id}")
+        return None, None, None
+
+    local_path = os.path.join(TEMP_FOLDER, oldest_file['name'])
+    print(f"Downloading oldest file: {oldest_file['name']} (created: {oldest_file['createdTime']})")
+    download_from_drive(oldest_file['id'], local_path, creds)
+    
+    is_video = oldest_file['mimeType'].startswith('video/')
+    return local_path, oldest_file['id'], is_video  # Return local path, file ID, and media type
+
+def delete_file_from_drive(file_id, creds):
+    """Delete a file from Google Drive."""
+    try:
+        drive_service = build('drive', 'v3', credentials=creds)
+        drive_service.files().delete(fileId=file_id).execute()
+        print(f"SUCCESS: Deleted file {file_id} from Google Drive")
+        return True
+    except Exception as e:
+        print(f"ERROR: Failed to delete file {file_id} from Google Drive: {str(e)}")
+        return False
 
 def adjust_aspect_ratio(video_path, output_path):
     try:
@@ -432,18 +452,15 @@ def main():
             sleep(10)
             continue
 
-        media_files = get_media_files(creds, account)
-        all_media = media_files['videos'] + media_files['images']
-
-        if not all_media:
+        # Get the oldest media file
+        media_to_post, drive_file_id, is_video = get_oldest_media_file(creds, account)
+        if not media_to_post:
             print(f"ERROR: No media files found in Google Drive for {account['username']}. Skipping.")
             update_account_after_post(account['id'])
             cleanup_temp_folder()
             continue
 
-        media_to_post = random.choice(all_media)
-        is_video = media_to_post in media_files['videos']
-        print(f"Selected random media to post: {os.path.basename(media_to_post)}")
+        print(f"Selected oldest media to post: {os.path.basename(media_to_post)}")
 
         post_path = media_to_post
         if is_video:
@@ -458,6 +475,13 @@ def main():
             caption = "#reels #instagram"
 
         if post_media(client, post_path, caption, is_video=is_video):
+            # Delete from Google Drive after successful posting
+            if drive_file_id:
+                if delete_file_from_drive(drive_file_id, creds):
+                    print(f"SUCCESS: File deleted from Google Drive after posting")
+                else:
+                    print(f"WARNING: File posted but could not delete from Google Drive")
+            
             update_account_after_post(account['id'])
         else:
             print("ERROR: Post failed. Database will not be updated for this run. Looking for next task.")
