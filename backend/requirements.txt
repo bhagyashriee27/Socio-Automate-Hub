@@ -1,0 +1,11 @@
+Flask==3.0.3
+mysql-connector-python==8.4.0
+python-dotenv==1.0.1
+google-auth-oauthlib==1.2.0
+google-api-python-client==2.149.0
+instagrapi==2.0.2
+python-telegram-bot==21.5
+transformers==4.44.2
+torch==2.4.1
+Pillow==10.4.0
+gunicorn==23.0.0

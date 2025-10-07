@@ -536,7 +536,7 @@ async def main():
         if not channel:
             print_info(f"No channels scheduled. Checking again in {IDLE_SLEEP_MINUTES} minutes...")
             await asyncio.sleep(IDLE_SLEEP_MINUTES * 60)
-            subprocess.run(["python", os.path.join(os.path.dirname(__file__), "scheduler_youtube.py")])
+            subprocess.run(["python", os.path.join(os.path.dirname(__file__), "scheduler_combined.py")])
             continue
 
         print_header("Next Scheduled Post")
