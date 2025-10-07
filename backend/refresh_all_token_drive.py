@@ -38,12 +38,6 @@ PLATFORM_CONFIGS = {
         'id_field': 'id',
         'name_field': 'channel_name'
     },
-    'facebook': {
-        'table': 'facebook',
-        'token_field': 'token_drive',
-        'id_field': 'id',
-        'name_field': 'username'
-    },
     'youtube': {
         'table': 'youtube',
         'token_field': 'token_sesson',  # YouTube uses token_sesson for Drive

@@ -18,6 +18,8 @@
 credentials.json
 /frontend/node_modules/credentials.json
 /backend/node_modules/credentials.json
+model_cache
+
 *.sql
 .env
 
