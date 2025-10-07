@@ -8,7 +8,6 @@ from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseDownload
 import io
-import random
 from datetime import datetime, timedelta
 import pytz
 import mysql.connector
@@ -21,7 +20,6 @@ from dotenv import load_dotenv
 
 # Load environment variables from .env file
 load_dotenv()
-
 
 # --- Configuration ---
 TEMP_FOLDER = "temp_telegram"
@@ -271,28 +269,55 @@ def download_from_drive(file_id, local_path, creds):
         status, done = downloader.next_chunk()
     print(f"Downloaded {file_id} to {local_path}")
 
-def get_media_files(creds, channel):
+def get_oldest_media_file(creds, channel):
+    """Get the oldest media file from Google Drive based on creation time."""
     folder_id, folder_link = get_drive_folder_id(creds, channel)
     if not folder_id:
         print("ERROR: Failed to get folder ID. Exiting.")
-        return []
+        return None, None
 
     drive_service = build('drive', 'v3', credentials=creds)
     query = f"'{folder_id}' in parents"
-    results = drive_service.files().list(q=query, fields="files(id, name, mimeType)").execute()
+    results = drive_service.files().list(
+        q=query, 
+        fields="files(id, name, mimeType, createdTime)",
+        orderBy="createdTime"  # Get files ordered by creation time (oldest first)
+    ).execute()
     files = results.get('files', [])
 
-    media_files = []
     if not files:
         print(f"ERROR: No media files found in folder {folder_id}")
-        return media_files
+        return None, None
 
+    # Filter for media files and get the oldest one
+    media_files = []
     for file in files:
         if file['mimeType'].startswith(('image/', 'video/')) or file['name'].lower().endswith('.zip'):
-            local_path = os.path.join(TEMP_FOLDER, file['name'])
-            download_from_drive(file['id'], local_path, creds)
-            media_files.append(local_path)
-    return media_files
+            media_files.append(file)
+
+    if not media_files:
+        print(f"ERROR: No valid media files found in folder {folder_id}")
+        return None, None
+
+    # Get the oldest file (first in the sorted list)
+    oldest_file = media_files[0]
+    local_path = os.path.join(TEMP_FOLDER, oldest_file['name'])
+    
+    print(f"Downloading oldest file: {oldest_file['name']} (created: {oldest_file['createdTime']})")
+    download_from_drive(oldest_file['id'], local_path, creds)
+    
+    return local_path, oldest_file['id']  # Return both local path and file ID for deletion
+
+def delete_file_from_drive(file_id, creds):
+    """Delete a file from Google Drive."""
+    try:
+        drive_service = build('drive', 'v3', credentials=creds)
+        drive_service.files().delete(fileId=file_id).execute()
+        print(f"SUCCESS: Deleted file {file_id} from Google Drive")
+        return True
+    except Exception as e:
+        print(f"ERROR: Failed to delete file {file_id} from Google Drive: {str(e)}")
+        return False
 
 def cleanup_temp_folder():
     print("Cleaning up temporary files...")
@@ -364,21 +389,29 @@ async def process_channel(channel):
         cleanup_temp_folder()
         return
 
-    media_files = get_media_files(creds, channel)
-    if not media_files:
+    # Get the oldest media file and its Drive ID
+    media_to_post, drive_file_id = get_oldest_media_file(creds, channel)
+    if not media_to_post:
         print(f"ERROR: No media files downloaded from Google Drive for {channel_name}. Skipping.")
         update_channel_after_post(channel['id'])
         cleanup_temp_folder()
         return
 
-    media_to_post = random.choice(media_files)
-    print(f"Selected random media to post: {os.path.basename(media_to_post)}")
+    print(f"Selected oldest media to post: {os.path.basename(media_to_post)}")
 
     if await send_file_to_channel(media_to_post, channel_id):
+        # Delete from Google Drive after successful posting
+        if drive_file_id:
+            if delete_file_from_drive(drive_file_id, creds):
+                print(f"SUCCESS: File deleted from Google Drive after posting")
+            else:
+                print(f"WARNING: File posted but could not delete from Google Drive")
+        
         update_channel_after_post(channel['id'])
     else:
         print(f"ERROR: Post failed for {os.path.basename(media_to_post)}. Database will not be updated for this run.")
-        # Do not update database on failure, but still clean up
+        # Do not update database on failure, and don't delete from Drive
+    
     cleanup_temp_folder()
 
 # --- Main Execution Logic ---
@@ -395,7 +428,7 @@ async def main():
         if not channel:
             print(f"No channels currently scheduled. Waiting for {IDLE_SLEEP_MINUTES} minutes...")
             await asyncio.sleep(IDLE_SLEEP_MINUTES * 60)
-            subprocess.run(["python", os.path.join(os.path.dirname(__file__), "scheduler_telegram.py")])
+            subprocess.run(["python", os.path.join(os.path.dirname(__file__), "scheduler_combined.py")])
             continue
 
         print("\n----------------------------------------------------")
@@ -421,7 +454,7 @@ async def main():
                 print(f"Next post in {minutes}m {seconds}s is over {RESCHEDULE_THRESHOLD_MINUTES} minutes. Running scheduler_telegram.py in {over_time * 60} seconds and restarting...")
                 await asyncio.sleep(over_time * 60)
                 try:
-                    subprocess.run(["python", os.path.join(os.path.dirname(__file__), "scheduler_telegram.py")], check=True)
+                    subprocess.run(["python", os.path.join(os.path.dirname(__file__), "scheduler_combined.py")])
                     print("Ran scheduler_telegram.py successfully.")
                 except subprocess.CalledProcessError as e:
                     print(f"ERROR: Failed to run scheduler_telegram.py: {str(e)}")
@@ -441,7 +474,7 @@ async def main():
         await process_channel(channel)
         print("Task complete. Looking for the next scheduled post...")
         await asyncio.sleep(2)
-        subprocess.run(["python", os.path.join(os.path.dirname(__file__), "scheduler_telegram.py")])
+        subprocess.run(["python", os.path.join(os.path.dirname(__file__), "scheduler_combined.py")])
 
 if __name__ == "__main__":
     asyncio.run(main())

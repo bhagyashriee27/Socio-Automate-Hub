@@ -401,7 +401,7 @@ def main():
                 print(f"Next post in {minutes}m {seconds}s is over {RESCHEDULE_THRESHOLD_MINUTES} minutes. Running scheduler_intagram.py in {over_time * 60} seconds and restarting...")
                 sleep(over_time * 60)
                 try:
-                    subprocess.run(["python", os.path.join(os.path.dirname(__file__), "scheduler_intagram.py")], check=True)
+                    subprocess.run(["python", os.path.join(os.path.dirname(__file__), "scheduler_combined.py")])
                     print("Ran scheduler_intagram.py successfully.")
                 except subprocess.CalledProcessError as e:
                     print(f"ERROR: Failed to run scheduler_intagram.py: {str(e)}")
@@ -465,7 +465,7 @@ def main():
         cleanup_temp_folder()
         print("Task complete. Looking for the next scheduled post...")
         sleep(2)
-        subprocess.run(["python", os.path.join(os.path.dirname(__file__), "scheduler_intagram.py")])
+        subprocess.run(["python", os.path.join(os.path.dirname(__file__), "scheduler_combined.py")])
 
 if __name__ == "__main__":
     main()
