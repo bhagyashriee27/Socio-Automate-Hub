@@ -12,6 +12,7 @@ import {
   RefreshControl,
   Switch,
 } from 'react-native';
+import Ionicons from 'react-native-vector-icons/Ionicons';
 import ApiService from '../services/api';
 import StorageService from '../utils/storage';
 import { InstagramAccount, TelegramAccount, User } from '../types';
@@ -57,18 +58,16 @@ const ScheduleScreen: React.FC = () => {
   const loadScheduleData = async (userId: number) => {
     try {
       setLoading(true);
-      console.log('📡 Fetching user data for ID:', userId);
+      console.log('Fetching user data for ID:', userId);
       const response = await ApiService.getUser(userId);
-      console.log('✅ Backend Response:', response);
+      console.log('Backend Response:', response);
       
-      // Check actual response structure
       console.log('Instagram accounts:', response.instagram_accounts);
       console.log('Telegram channels:', response.telegram_channels);
       
       setInstagramAccounts(response.instagram_accounts || []);
       setTelegramAccounts(response.telegram_channels || []);
       
-      // Debug data
       if (response.instagram_accounts?.length > 0) {
         debugAccountData(response.instagram_accounts, 'Instagram');
       }
@@ -77,7 +76,7 @@ const ScheduleScreen: React.FC = () => {
       }
       
     } catch (error: any) {
-      console.error('❌ API Error Details:', {
+      console.error('API Error Details:', {
         message: error.message,
         response: error.response?.data,
         status: error.response?.status
@@ -90,7 +89,7 @@ const ScheduleScreen: React.FC = () => {
   };
 
   const debugAccountData = (accounts: any[], platform: string) => {
-    console.log(`🔍 ${platform} Accounts Debug:`);
+    console.log(`${platform} Accounts Debug:`);
     accounts.forEach((acc, index) => {
       console.log(`Account ${index + 1}:`, {
         id: acc.id,
@@ -134,7 +133,6 @@ const ScheduleScreen: React.FC = () => {
     if (!editingAccount) return;
 
     try {
-      // Validation
       if (!formData.username && !formData.channel_name) {
         Alert.alert('Error', 'Username/Channel Name is required');
         return;
@@ -156,27 +154,26 @@ const ScheduleScreen: React.FC = () => {
       }
 
       const updateData: any = {
-        email: editingAccount.email, // Required by backend
+        email: editingAccount.email,
         sch_start_range: formData.sch_start_range,
         sch_end_range: formData.sch_end_range,
         number_of_posts: parseInt(formData.number_of_posts),
         selected: formData.selected ? 'Yes' : 'No',
       };
 
-      // Platform-specific fields
       if (editingAccount.platform === 'instagram') {
         if (formData.username) updateData.username = formData.username;
         if (formData.password) updateData.password = formData.password;
         if (formData.google_drive_link) updateData.google_drive_link = formData.google_drive_link;
         
-        console.log('🔄 Updating Instagram account:', updateData);
+        console.log('Updating Instagram account:', updateData);
         await ApiService.updateInstagramAccount(editingAccount.id, updateData);
       } else {
         if (formData.channel_name) updateData.channel_name = formData.channel_name;
         if (formData.google_drive_link) updateData.google_drive_link = formData.google_drive_link;
         if (editingAccount.token_sesson) updateData.token_sesson = editingAccount.token_sesson;
         
-        console.log('🔄 Updating Telegram account:', updateData);
+        console.log('Updating Telegram account:', updateData);
         await ApiService.updateTelegramAccount(editingAccount.id, updateData);
       }
 
@@ -186,7 +183,7 @@ const ScheduleScreen: React.FC = () => {
         await loadScheduleData(user.Id);
       }
     } catch (error: any) {
-      console.error('❌ Update Error:', error.response?.data);
+      console.error('Update Error:', error.response?.data);
       Alert.alert('Error', error.response?.data?.error || 'Failed to update account');
     }
   };
@@ -195,19 +192,16 @@ const ScheduleScreen: React.FC = () => {
     try {
       const newStatus = account.selected === 'Yes' ? 'No' : 'Yes';
       
-      // Include ALL required fields for the update
       const updateData: any = {
-        email: account.email, // Required by backend
+        email: account.email,
         sch_start_range: account.sch_start_range || '09:00:00',
         sch_end_range: account.sch_end_range || '17:00:00',
         number_of_posts: parseInt(account.number_of_posts) || 5,
         selected: newStatus
       };
 
-      // Add platform-specific required fields
       if (platform === 'instagram') {
         updateData.username = account.username;
-        // Only include password if we have it
         if (account.passwand && account.passwand.trim() !== '') {
           updateData.password = account.passwand;
         }
@@ -216,7 +210,7 @@ const ScheduleScreen: React.FC = () => {
         updateData.token_sesson = account.token_sesson;
       }
 
-      console.log(`🔄 Toggling ${platform} account:`, updateData);
+      console.log(`Toggling ${platform} account:`, updateData);
 
       let response;
       if (platform === 'instagram') {
@@ -225,9 +219,8 @@ const ScheduleScreen: React.FC = () => {
         response = await ApiService.updateTelegramAccount(account.id, updateData);
       }
 
-      console.log('✅ Toggle response:', response);
+      console.log('Toggle response:', response);
 
-      // Update local state immediately for better UX
       if (platform === 'instagram') {
         setInstagramAccounts(prev => 
           prev.map(acc => 
@@ -244,17 +237,15 @@ const ScheduleScreen: React.FC = () => {
 
       Alert.alert('Success', `Account ${newStatus === 'Yes' ? 'activated' : 'deactivated'} successfully!`);
     } catch (error: any) {
-      console.error('❌ Toggle Error Details:', {
+      console.error('Toggle Error Details:', {
         message: error.message,
         response: error.response?.data,
         status: error.response?.status
       });
       
-      // Show specific backend error message
       const errorMessage = error.response?.data?.error || 'Failed to update account status';
       Alert.alert('Update Failed', errorMessage);
       
-      // Revert the toggle in UI since it failed
       if (platform === 'instagram') {
         setInstagramAccounts(prev => 
           prev.map(acc => 
@@ -291,7 +282,7 @@ const ScheduleScreen: React.FC = () => {
               }
               Alert.alert('Success', 'Account deleted successfully!');
             } catch (error: any) {
-              console.error('❌ Delete Error:', error.response?.data);
+              console.error('Delete Error:', error.response?.data);
               Alert.alert('Error', error.response?.data?.error || 'Failed to delete account');
             }
           },
@@ -300,7 +291,6 @@ const ScheduleScreen: React.FC = () => {
     );
   };
 
-  // Time-based status logic
   const isInTimeRange = (startTime: string, endTime: string) => {
     if (!startTime || !endTime) return false;
     
@@ -332,20 +322,20 @@ const ScheduleScreen: React.FC = () => {
     
     let statusText = 'Active';
     let statusColor = '#34C759';
-    let statusIcon = '🟢';
+    let statusIcon = 'checkmark-circle';
     
     if (hasNoPosts) {
       statusText = 'No Posts';
       statusColor = '#FF9500';
-      statusIcon = '🟡';
+      statusIcon = 'alert-circle';
     } else if (isOutsideTimeRange) {
       statusText = 'Outside Hours';
       statusColor = '#FF9500';
-      statusIcon = '🟡';
+      statusIcon = 'alert-circle';
     } else if (isInactiveBySelection) {
       statusText = 'Inactive';
       statusColor = '#FF3B30';
-      statusIcon = '🔴';
+      statusIcon = 'close-circle';
     }
     
     return {
@@ -378,16 +368,15 @@ const ScheduleScreen: React.FC = () => {
               {platform === 'instagram' ? account.username : account.channel_name}
             </Text>
             <View style={[styles.statusBadge, { backgroundColor: status.statusColor }]}>
-              <Text style={styles.statusText}>
-                {status.statusIcon} {status.statusText}
-              </Text>
+              <Ionicons name={status.statusIcon} size={14} color="#fff" style={styles.statusIcon} />
+              <Text style={styles.statusText}>{status.statusText}</Text>
             </View>
           </View>
           <Switch
             value={account.selected === 'Yes'}
             onValueChange={() => toggleAccountStatus(account, platform)}
-            trackColor={{ false: '#767577', true: '#81b0ff' }}
-            thumbColor={account.selected === 'Yes' ? '#007AFF' : '#f4f3f4'}
+            trackColor={{ false: '#6B7280', true: '#1C2526' }}
+            thumbColor={account.selected === 'Yes' ? '#1C2526' : '#6B7280'}
           />
         </View>
 
@@ -396,42 +385,42 @@ const ScheduleScreen: React.FC = () => {
             styles.detailText,
             status.isInactive && styles.inactiveText
           ]}>
-            📧 {account.email}
+            <Ionicons name="mail" size={14} color={status.isInactive ? '#6B7280' : '#1C2526'} /> {account.email}
           </Text>
           <View style={styles.detailRow}>
             <Text style={[
               styles.detailText,
               status.isInactive && styles.inactiveText
             ]}>
-              ⏰ {account.sch_start_range || '09:00:00'} - {account.sch_end_range || '17:00:00'}
+              <Ionicons name="time" size={14} color={status.isInactive ? '#6B7280' : '#1C2526'} /> {account.sch_start_range || '09:00:00'} - {account.sch_end_range || '17:00:00'}
             </Text>
             <Text style={[
               styles.detailText,
               status.isInactive && styles.inactiveText
             ]}>
-              📊 {postsLeft}/{totalPosts} posts
+              <Ionicons name="stats-chart" size={14} color={status.isInactive ? '#6B7280' : '#1C2526'} /> {postsLeft}/{totalPosts} posts
             </Text>
           </View>
           
           {status.hasNoPosts && (
             <Text style={styles.warningText}>
-              ⚠️ No posts remaining
+              <Ionicons name="alert-circle" size={14} color="#FF9500" /> No posts remaining
             </Text>
           )}
           
           {status.isOutsideTimeRange && account.selected === 'Yes' && (
             <Text style={styles.warningText}>
-              ⚠️ Outside scheduled hours
+              <Ionicons name="alert-circle" size={14} color="#FF9500" /> Outside scheduled hours
             </Text>
           )}
           
           {account.google_drive_link ? (
             <Text style={styles.driveLink} numberOfLines={1}>
-              📁 Drive: {account.google_drive_link}
+              <Ionicons name="folder" size={14} color="#007AFF" /> Drive: {account.google_drive_link}
             </Text>
           ) : (
             <Text style={styles.warningText}>
-              ⚠️ No Google Drive configured
+              <Ionicons name="alert-circle" size={14} color="#FF9500" /> No Google Drive configured
             </Text>
           )}
         </View>
@@ -441,13 +430,15 @@ const ScheduleScreen: React.FC = () => {
             style={styles.editButton}
             onPress={() => openEditModal(account, platform)}
           >
-            <Text style={styles.editButtonText}>✏️ Edit</Text>
+            <Ionicons name="create" size={14} color="#fff" />
+            <Text style={styles.editButtonText}> Edit</Text>
           </TouchableOpacity>
           <TouchableOpacity
             style={styles.deleteButton}
             onPress={() => deleteAccount(account.id, platform)}
           >
-            <Text style={styles.deleteButtonText}>🗑️ Delete</Text>
+            <Ionicons name="trash" size={14} color="#fff" />
+            <Text style={styles.deleteButtonText}> Delete</Text>
           </TouchableOpacity>
         </View>
       </View>
@@ -457,7 +448,7 @@ const ScheduleScreen: React.FC = () => {
   if (loading) {
     return (
       <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color="#007AFF" />
+        <ActivityIndicator size="large" color="#1C2526" />
         <Text style={styles.loadingText}>Loading schedule data...</Text>
       </View>
     );
@@ -468,7 +459,7 @@ const ScheduleScreen: React.FC = () => {
   const accountsInTimeRange = allAccounts.filter(acc => 
     acc.selected === 'Yes' && isInTimeRange(acc.sch_start_range, acc.sch_end_range)
   );
-  const totalPostsLeft = allAccounts.reduce((sum, acc) => sum + (parseInt(acc.posts_left) || 0), 0);
+  const totalPostsLeft = allAccounts.reduce((sum, acc) => sum + (parseInt(String(acc.posts_left)) || 0), 0);
 
   return (
     <View style={styles.container}>
@@ -478,9 +469,10 @@ const ScheduleScreen: React.FC = () => {
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
         }
       >
-        {/* Header Stats */}
         <View style={styles.header}>
-          <Text style={styles.headerTitle}>📅 Schedule Management</Text>
+          <Text style={styles.headerTitle}>
+            <Ionicons name="calendar" size={20} color="#1C2526" /> Schedule Management
+          </Text>
           <View style={styles.statsContainer}>
             <View style={styles.statItem}>
               <Text style={styles.statNumber}>{allAccounts.length}</Text>
@@ -501,26 +493,29 @@ const ScheduleScreen: React.FC = () => {
           </View>
         </View>
 
-        {/* Quick Actions */}
         <View style={styles.quickActions}>
           <Text style={styles.sectionTitle}>Quick Actions</Text>
           <View style={styles.actionButtons}>
             <TouchableOpacity style={styles.quickActionButton}>
-              <Text style={styles.quickActionText}>🔄 Reset All</Text>
+              <Ionicons name="refresh" size={14} color="#1C2526" />
+              <Text style={styles.quickActionText}> Reset All</Text>
             </TouchableOpacity>
             <TouchableOpacity style={styles.quickActionButton}>
-              <Text style={styles.quickActionText}>⚡ Activate All</Text>
+              <Ionicons name="play" size={14} color="#1C2526" />
+              <Text style={styles.quickActionText}> Activate All</Text>
             </TouchableOpacity>
             <TouchableOpacity style={styles.quickActionButton}>
-              <Text style={styles.quickActionText}>⏸️ Pause All</Text>
+              <Ionicons name="pause" size={14} color="#1C2526" />
+              <Text style={styles.quickActionText}> Pause All</Text>
             </TouchableOpacity>
           </View>
         </View>
 
-        {/* Instagram Accounts Section */}
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>📸 Instagram Accounts</Text>
+            <Text style={styles.sectionTitle}>
+              <Ionicons name="logo-instagram" size={20} color="#1C2526" /> Instagram Accounts
+            </Text>
             <Text style={styles.sectionSubtitle}>
               {instagramAccounts.filter(acc => acc.selected === 'Yes').length} active • {' '}
               {instagramAccounts.filter(acc => acc.selected === 'Yes' && isInTimeRange(acc.sch_start_range, acc.sch_end_range)).length} in time range
@@ -538,10 +533,11 @@ const ScheduleScreen: React.FC = () => {
           )}
         </View>
 
-        {/* Telegram Accounts Section */}
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>📢 Telegram Channels</Text>
+            <Text style={styles.sectionTitle}>
+              <Ionicons name="paper-plane" size={20} color="#1C2526" /> Telegram Channels
+            </Text>
             <Text style={styles.sectionSubtitle}>
               {telegramAccounts.filter(acc => acc.selected === 'Yes').length} active • {' '}
               {telegramAccounts.filter(acc => acc.selected === 'Yes' && isInTimeRange(acc.sch_start_range, acc.sch_end_range)).length} in time range
@@ -559,9 +555,10 @@ const ScheduleScreen: React.FC = () => {
           )}
         </View>
 
-        {/* Help Section */}
         <View style={styles.helpSection}>
-          <Text style={styles.helpTitle}>💡 Scheduling Tips</Text>
+          <Text style={styles.helpTitle}>
+            <Ionicons name="bulb" size={16} color="#007AFF" /> Scheduling Tips
+          </Text>
           <View style={styles.tipItem}>
             <Text style={styles.tipText}>• Accounts will only post during their scheduled time ranges</Text>
           </View>
@@ -574,7 +571,6 @@ const ScheduleScreen: React.FC = () => {
         </View>
       </ScrollView>
 
-      {/* Edit Account Modal */}
       <Modal
         animationType="slide"
         transparent={true}
@@ -585,10 +581,9 @@ const ScheduleScreen: React.FC = () => {
           <View style={styles.modalContent}>
             <ScrollView style={styles.modalScroll}>
               <Text style={styles.modalTitle}>
-                ✏️ Edit {editingAccount?.platform === 'instagram' ? 'Instagram' : 'Telegram'} Account
+                <Ionicons name="create" size={20} color="#1C2526" /> Edit {editingAccount?.platform === 'instagram' ? 'Instagram' : 'Telegram'} Account
               </Text>
 
-              {/* Username/Channel Name */}
               <View style={styles.inputContainer}>
                 <Text style={styles.inputLabel}>
                   {editingAccount?.platform === 'instagram' ? 'Username' : 'Channel Name'} *
@@ -605,7 +600,6 @@ const ScheduleScreen: React.FC = () => {
                 />
               </View>
 
-              {/* Password (Instagram only) */}
               {editingAccount?.platform === 'instagram' && (
                 <View style={styles.inputContainer}>
                   <Text style={styles.inputLabel}>Password</Text>
@@ -619,7 +613,6 @@ const ScheduleScreen: React.FC = () => {
                 </View>
               )}
 
-              {/* Google Drive Link */}
               <View style={styles.inputContainer}>
                 <Text style={styles.inputLabel}>Google Drive Link</Text>
                 <TextInput
@@ -630,7 +623,6 @@ const ScheduleScreen: React.FC = () => {
                 />
               </View>
 
-              {/* Schedule Time Range */}
               <View style={styles.timeContainer}>
                 <View style={styles.timeInput}>
                   <Text style={styles.inputLabel}>Start Time *</Text>
@@ -652,7 +644,6 @@ const ScheduleScreen: React.FC = () => {
                 </View>
               </View>
 
-              {/* Number of Posts */}
               <View style={styles.inputContainer}>
                 <Text style={styles.inputLabel}>Number of Posts *</Text>
                 <TextInput
@@ -664,48 +655,59 @@ const ScheduleScreen: React.FC = () => {
                 />
               </View>
 
-              {/* Active Status */}
               <View style={styles.switchContainer}>
                 <Text style={styles.inputLabel}>Active Schedule</Text>
                 <Switch
                   value={formData.selected}
                   onValueChange={(value) => setFormData({...formData, selected: value})}
-                  trackColor={{ false: '#767577', true: '#81b0ff' }}
-                  thumbColor={formData.selected ? '#007AFF' : '#f4f3f4'}
+                  trackColor={{ false: '#6B7280', true: '#1C2526' }}
+                  thumbColor={formData.selected ? '#1C2526' : '#6B7280'}
                 />
               </View>
 
-              {/* Current Status Preview */}
               {formData.sch_start_range && formData.sch_end_range && (
                 <View style={styles.statusPreview}>
                   <Text style={styles.statusPreviewTitle}>Status Preview:</Text>
-                  <Text style={[
-                    styles.statusPreviewText,
-                    { color: isInTimeRange(formData.sch_start_range, formData.sch_end_range) && formData.selected ? '#34C759' : '#FF9500' }
-                  ]}>
-                    {formData.selected 
-                      ? (isInTimeRange(formData.sch_start_range, formData.sch_end_range) 
-                          ? '🟢 Active and in time range' 
-                          : '🟡 Active but outside time range')
-                      : '🔴 Inactive'
-                    }
-                  </Text>
+                  <View style={styles.statusPreviewContent}>
+                    <Ionicons
+                      name={formData.selected 
+                        ? (isInTimeRange(formData.sch_start_range, formData.sch_end_range) 
+                            ? 'checkmark-circle' 
+                            : 'alert-circle')
+                        : 'close-circle'}
+                      size={14}
+                      color={isInTimeRange(formData.sch_start_range, formData.sch_end_range) && formData.selected ? '#34C759' : '#FF9500'}
+                    />
+                    <Text style={[
+                      styles.statusPreviewText,
+                      { 
+                        color: isInTimeRange(formData.sch_start_range, formData.sch_end_range) && formData.selected ? '#34C759' : '#FF9500' 
+                      }
+                    ]}>
+                      {formData.selected 
+                        ? (isInTimeRange(formData.sch_start_range, formData.sch_end_range) 
+                            ? ' Active and in time range' 
+                            : ' Active but outside time range')
+                        : ' Inactive'}
+                    </Text>
+                  </View>
                 </View>
               )}
 
-              {/* Action Buttons */}
               <View style={styles.modalActions}>
                 <TouchableOpacity
                   style={styles.cancelButton}
                   onPress={() => setModalVisible(false)}
                 >
-                  <Text style={styles.cancelButtonText}>❌ Cancel</Text>
+                  <Ionicons name="close" size={16} color="#333" />
+                  <Text style={styles.cancelButtonText}> Cancel</Text>
                 </TouchableOpacity>
                 <TouchableOpacity
                   style={styles.saveButton}
                   onPress={handleUpdateAccount}
                 >
-                  <Text style={styles.saveButtonText}>💾 Save Changes</Text>
+                  <Ionicons name="save" size={16} color="#fff" />
+                  <Text style={styles.saveButtonText}> Save Changes</Text>
                 </TouchableOpacity>
               </View>
             </ScrollView>
@@ -730,10 +732,47 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     backgroundColor: '#f5f5f5',
   },
+  modalActions: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    marginTop: 20,
+    gap: 10,
+  },
+  cancelButton: {
+    backgroundColor: '#f8f8f8',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 6,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    borderWidth: 1,
+    borderColor: '#ddd',
+    marginRight: 10,
+  },
+  saveButton: {
+    backgroundColor: '#34C759',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 6,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+  },
+  saveButtonText: {
+    color: '#fff',
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  cancelButtonText: {
+    color: '#333',
+    fontSize: 13,
+    fontWeight: '600',
+  },
   loadingText: {
     marginTop: 16,
     fontSize: 16,
-    color: '#666',
+    color: '#6B7280',
   },
   header: {
     backgroundColor: '#fff',
@@ -759,11 +798,11 @@ const styles = StyleSheet.create({
   statNumber: {
     fontSize: 20,
     fontWeight: 'bold',
-    color: '#007AFF',
+    color: '#1C2526',
   },
   statLabel: {
     fontSize: 11,
-    color: '#666',
+    color: '#6B7280',
     marginTop: 4,
     textAlign: 'center',
   },
@@ -783,6 +822,9 @@ const styles = StyleSheet.create({
     padding: 12,
     borderRadius: 8,
     alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: 5,
   },
   quickActionText: {
     fontSize: 12,
@@ -802,7 +844,7 @@ const styles = StyleSheet.create({
   },
   sectionSubtitle: {
     fontSize: 12,
-    color: '#666',
+    color: '#6B7280',
     marginTop: 4,
   },
   accountCard: {
@@ -838,13 +880,19 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   inactiveAccountName: {
-    color: '#666',
+    color: '#6B7280',
   },
   statusBadge: {
     paddingHorizontal: 10,
     paddingVertical: 4,
     borderRadius: 12,
     alignSelf: 'flex-start',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+  },
+  statusIcon: {
+    marginRight: 5,
   },
   statusText: {
     color: '#fff',
@@ -889,6 +937,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 8,
     borderRadius: 6,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
   },
   editButtonText: {
     color: '#fff',
@@ -900,6 +951,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 8,
     borderRadius: 6,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
   },
   deleteButtonText: {
     color: '#fff',
@@ -914,7 +968,7 @@ const styles = StyleSheet.create({
   },
   emptyText: {
     fontSize: 16,
-    color: '#666',
+    color: '#6B7280',
     marginBottom: 8,
   },
   emptySubtext: {
@@ -1005,6 +1059,11 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     marginBottom: 20,
   },
+  statusPreviewContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+  },
   statusPreviewTitle: {
     fontSize: 14,
     fontWeight: '600',
@@ -1014,34 +1073,6 @@ const styles = StyleSheet.create({
   statusPreviewText: {
     fontSize: 13,
     fontWeight: '500',
-  },
-  modalActions: {
-    flexDirection: 'row',
-    gap: 10,
-  },
-  cancelButton: {
-    flex: 1,
-    backgroundColor: '#ccc',
-    padding: 15,
-    borderRadius: 8,
-    alignItems: 'center',
-  },
-  cancelButtonText: {
-    color: '#333',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  saveButton: {
-    flex: 1,
-    backgroundColor: '#007AFF',
-    padding: 15,
-    borderRadius: 8,
-    alignItems: 'center',
-  },
-  saveButtonText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '600',
   },
 });
 

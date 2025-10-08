@@ -3,13 +3,14 @@ import { createStackNavigator } from '@react-navigation/stack';
 import { NavigationProp, useNavigation } from '@react-navigation/native';
 import React, { useEffect, useState } from 'react';
 import { ActivityIndicator, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import Ionicons from 'react-native-vector-icons/Ionicons';
 
 // Import screens
 import AccountsScreen from './AccountsScreen';
 import DashboardScreen from './DashboardScreen';
 import LoginScreen from './LoginScreen';
 import SignupScreen from './SignupScreen';
-import ForgotPasswordScreen from './ForgotPasswordScreen'; // Add this import
+import ForgotPasswordScreen from './ForgotPasswordScreen';
 import Profile from './Profile';
 import UploadScreen from './UploadScreen';
 import ScheduleScreen from './ScheduleScreen';
@@ -22,7 +23,7 @@ type RootStackParamList = {
   FrontPage: undefined;
   Login: undefined;
   Signup: undefined;
-  ForgotPassword: undefined; // Add this
+  ForgotPassword: undefined;
   Main: undefined;
 };
 
@@ -52,58 +53,76 @@ const FrontPage = () => {
 const MainTabs = () => (
   <Tab.Navigator
     screenOptions={{
-      tabBarActiveTintColor: '#007AFF',
-      tabBarInactiveTintColor: '#666',
+      tabBarActiveTintColor: '#1C2526',
+      tabBarInactiveTintColor: '#6B7280',
       tabBarStyle: {
         backgroundColor: '#fff',
         borderTopWidth: 1,
         borderTopColor: '#eee',
       },
+      headerTitle: ({ children }) => (
+        <Text style={styles.headerTitle}>{children}</Text>
+      ),
     }}
   >
     <Tab.Screen
       name="Dashboard"
       component={DashboardScreen}
       options={{
-        tabBarLabel: 'Dashboard',
-        tabBarIcon: ({ color }) => <Text style={{ color, fontSize: 20 }}>📊</Text>,
-        headerTitle: 'Dashboard',
+        tabBarLabel: ({ focused }) => (
+          <Text style={[styles.tabBarLabel, { color: focused ? '#1C2526' : '#6B7280' }]}>
+            Dashboard
+          </Text>
+        ),
+        tabBarIcon: ({ color, size }) => <Ionicons name="stats-chart" size={size} color={color} />,
       }}
     />
     <Tab.Screen
       name="Accounts"
       component={AccountsScreen}
       options={{
-        tabBarLabel: 'Accounts',
-        tabBarIcon: ({ color }) => <Text style={{ color, fontSize: 20 }}>👥</Text>,
-        headerTitle: 'Social Media Accounts',
+        tabBarLabel: ({ focused }) => (
+          <Text style={[styles.tabBarLabel, { color: focused ? '#1C2526' : '#6B7280' }]}>
+            Accounts
+          </Text>
+        ),
+        tabBarIcon: ({ color, size }) => <Ionicons name="people" size={size} color={color} />,
       }}
     />
     <Tab.Screen
       name="Schedule"
       component={ScheduleScreen}
       options={{
-        tabBarLabel: 'Schedule',
-        tabBarIcon: ({ color }) => <Text style={{ color, fontSize: 20 }}>📅</Text>,
-        headerTitle: 'Schedule Posts',
+        tabBarLabel: ({ focused }) => (
+          <Text style={[styles.tabBarLabel, { color: focused ? '#1C2526' : '#6B7280' }]}>
+            Schedule
+          </Text>
+        ),
+        tabBarIcon: ({ color, size }) => <Ionicons name="calendar" size={size} color={color} />,
       }}
     />
     <Tab.Screen
       name="Upload"
       component={UploadScreen}
       options={{
-        tabBarLabel: 'Upload',
-        tabBarIcon: ({ color }) => <Text style={{ color, fontSize: 20 }}>📤</Text>,
-        headerTitle: 'Upload Media',
+        tabBarLabel: ({ focused }) => (
+          <Text style={[styles.tabBarLabel, { color: focused ? '#1C2526' : '#6B7280' }]}>
+            Upload
+          </Text>
+        ),
+        tabBarIcon: ({ color, size }) => <Ionicons name="cloud-upload" size={size} color={color} />,
       }}
     />
     <Tab.Screen
       name="Profile"
       component={Profile}
       options={{
-        tabBarLabel: 'Profile',
-        tabBarIcon: ({ color }) => <Text style={{ color, fontSize: 20 }}>👤</Text>,
-        headerTitle: 'Profile',
+        tabBarLabel: ({ focused }) => (
+          <Text style={[styles.tabBarLabel, { color: focused ? '#1C2526' : '#6B7280' }]}>
+            Profile
+          </Text>
+        ),
+        tabBarIcon: ({ color, size }) => <Ionicons name="person" size={size} color={color} />,
       }}
     />
   </Tab.Navigator>
@@ -132,7 +151,7 @@ export default function Layout() {
   if (isLoading) {
     return (
       <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color="#007AFF" />
+        <ActivityIndicator size="large" color="#1C2526" />
         <Text style={styles.loadingText}>Loading...</Text>
       </View>
     );
@@ -146,12 +165,14 @@ export default function Layout() {
       <Stack.Screen name="FrontPage" component={FrontPage} />
       <Stack.Screen name="Login" component={LoginScreen} />
       <Stack.Screen name="Signup" component={SignupScreen} />
-      <Stack.Screen 
-        name="ForgotPassword" 
+      <Stack.Screen
+        name="ForgotPassword"
         component={ForgotPasswordScreen}
-        options={{ 
+        options={{
           headerShown: true,
-          title: 'Reset Password',
+          headerTitle: () => (
+            <Text style={styles.headerTitle}>Reset Password</Text>
+          ),
           headerStyle: {
             backgroundColor: '#03021eff',
           },
@@ -176,7 +197,7 @@ const styles = StyleSheet.create({
   loadingText: {
     marginTop: 16,
     fontSize: 16,
-    color: '#666',
+    color: '#6B7280',
   },
   container: {
     flex: 1,
@@ -189,5 +210,14 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     color: '#fff',
     textAlign: 'center',
+  },
+  tabBarLabel: {
+    fontSize: 12,
+    fontWeight: '500',
+  },
+  headerTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#1C2526',
   },
 });

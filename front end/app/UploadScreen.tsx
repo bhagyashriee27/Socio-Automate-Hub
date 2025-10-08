@@ -12,6 +12,7 @@ import {
   Platform,
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
+import * as FileSystem from 'expo-file-system/legacy';
 import ApiService from '../services/api';
 import StorageService from '../utils/storage';
 import { InstagramAccount, TelegramAccount, FacebookAccount, YouTubeAccount } from '../types';
@@ -21,10 +22,19 @@ interface MediaFile {
   uri: string;
   type: 'image' | 'video';
   name: string;
+  size: number;
   status: 'pending' | 'uploading' | 'completed' | 'failed';
   progress?: number;
   selected?: boolean;
+  chunkProgress?: { uploaded: number; total: number };
 }
+
+interface ChunkProgress {
+  [key: string]: { uploaded: number; total: number };
+}
+
+const CHUNK_SIZE = 2 * 1024 * 1024; // 2MB chunks
+const MAX_RETRIES = 3;
 
 const UploadScreen: React.FC = () => {
   const [platform, setPlatform] = useState<'instagram' | 'telegram' | 'facebook' | 'youtube'>('instagram');
@@ -35,7 +45,7 @@ const UploadScreen: React.FC = () => {
   const [user, setUser] = useState<any>(null);
   const [modalVisible, setModalVisible] = useState(false);
   const [uploadProgress, setUploadProgress] = useState<{ [key: string]: number }>({});
-  const [accountSelectorVisible, setAccountSelectorVisible] = useState(false);
+  const [chunkProgress, setChunkProgress] = useState<ChunkProgress>({});
 
   useEffect(() => {
     loadUserData();
@@ -73,7 +83,7 @@ const UploadScreen: React.FC = () => {
           break;
       }
       setAccounts(platformAccounts);
-      setSelectedAccounts([]); // Reset selected accounts on platform change
+      setSelectedAccounts([]);
     } catch (error: any) {
       console.error('Error loading accounts:', error);
       Alert.alert('Error', 'Failed to load accounts');
@@ -88,11 +98,12 @@ const UploadScreen: React.FC = () => {
         return;
       }
 
-      const mediaTypes = mediaType === 'images'
-        ? ImagePicker.MediaTypeOptions.Images
-        : mediaType === 'videos'
-        ? ImagePicker.MediaTypeOptions.Videos
-        : ImagePicker.MediaTypeOptions.All;
+      let mediaTypes: any = ImagePicker.MediaTypeOptions.All;
+      if (mediaType === 'images') {
+        mediaTypes = ImagePicker.MediaTypeOptions.Images;
+      } else if (mediaType === 'videos') {
+        mediaTypes = ImagePicker.MediaTypeOptions.Videos;
+      }
 
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes,
@@ -102,14 +113,39 @@ const UploadScreen: React.FC = () => {
       });
 
       if (!result.canceled && result.assets) {
-        const newMedia: MediaFile[] = result.assets.map((asset, index) => ({
-          id: `${Date.now()}-${index}`,
-          uri: asset.uri,
-          type: asset.type === 'video' ? 'video' : 'image',
-          name: asset.fileName || `media-${Date.now()}-${index}.${asset.type === 'video' ? 'mp4' : 'jpg'}`,
-          status: 'pending',
-          selected: true,
-        }));
+        const newMedia: MediaFile[] = await Promise.all(
+          result.assets.map(async (asset, index) => {
+            try {
+              const fileInfo = await FileSystem.getInfoAsync(asset.uri);
+              let fileSize = 0;
+              
+              if (fileInfo.exists && 'size' in fileInfo) {
+                fileSize = fileInfo.size || 0;
+              }
+
+              return {
+                id: `${Date.now()}-${index}`,
+                uri: asset.uri,
+                type: asset.type === 'video' ? 'video' : 'image',
+                name: asset.fileName || `media-${Date.now()}-${index}.${asset.type === 'video' ? 'mp4' : 'jpg'}`,
+                size: fileSize,
+                status: 'pending',
+                selected: true,
+              };
+            } catch (error) {
+              console.error('Error getting file info:', error);
+              return {
+                id: `${Date.now()}-${index}`,
+                uri: asset.uri,
+                type: asset.type === 'video' ? 'video' : 'image',
+                name: asset.fileName || `media-${Date.now()}-${index}.${asset.type === 'video' ? 'mp4' : 'jpg'}`,
+                size: 0,
+                status: 'pending',
+                selected: true,
+              };
+            }
+          })
+        );
         setSelectedMedia(prev => [...prev, ...newMedia]);
       }
     } catch (error) {
@@ -141,11 +177,17 @@ const UploadScreen: React.FC = () => {
       delete newProgress[mediaId];
       return newProgress;
     });
+    setChunkProgress(prev => {
+      const newProgress = { ...prev };
+      delete newProgress[mediaId];
+      return newProgress;
+    });
   };
 
   const clearAllMedia = () => {
     setSelectedMedia([]);
     setUploadProgress({});
+    setChunkProgress({});
   };
 
   const getSelectedMedia = () => {
@@ -172,63 +214,35 @@ const UploadScreen: React.FC = () => {
     let successfulUploads = 0;
     let failedUploads = 0;
 
-    for (let i = 0; i < mediaToUpload.length; i++) {
-      const media = mediaToUpload[i];
-      try {
-        for (const accountId of selectedAccounts) {
-          const formData = new FormData();
-          formData.append('file', {
-            uri: media.uri,
-            type: media.type === 'image' ? 'image/jpeg' : 'video/mp4',
-            name: media.name,
-          } as any);
-          formData.append('account_id', accountId);
-          formData.append('platform', platform);
-          formData.append('user_id', user.Id.toString());
+    const concurrencyLimit = 2;
+    const batches = [];
+    
+    for (let i = 0; i < mediaToUpload.length; i += concurrencyLimit) {
+      batches.push(mediaToUpload.slice(i, i + concurrencyLimit));
+    }
 
-          const progressInterval = setInterval(() => {
-            setUploadProgress(prev => ({
-              ...prev,
-              [media.id]: Math.min((prev[media.id] || 0) + 10, 90)
-            }));
-          }, 200);
+    for (const batch of batches) {
+      const batchPromises = batch.map(media => 
+        uploadMediaToAccounts(media, selectedAccounts)
+          .then(result => {
+            if (result.success) successfulUploads++;
+            else failedUploads++;
+          })
+          .catch(() => failedUploads++)
+      );
 
-          console.log(`Uploading file: ${media.name} to account ${accountId}`);
-          const response = await ApiService.uploadMedia(formData);
-
-          clearInterval(progressInterval);
-          setUploadProgress(prev => ({ ...prev, [media.id]: 100 }));
-
-          if (response.message || response.file_id) {
-            console.log(`✅ Upload successful: ${media.name} to account ${accountId}`);
-          } else {
-            throw new Error(response.error || 'Upload failed without specific error');
-          }
-
-          await new Promise(resolve => setTimeout(resolve, 500));
-        }
-        setSelectedMedia(prev =>
-          prev.map(m => m.id === media.id ? { ...m, status: 'completed' } : m)
-        );
-        successfulUploads++;
-      } catch (error: any) {
-        console.error(`❌ Upload failed for ${media.name}:`, error);
-        setSelectedMedia(prev =>
-          prev.map(m => m.id === media.id ? { ...m, status: 'failed' } : m)
-        );
-        failedUploads++;
-        if (error.response) console.error('Error response:', error.response.data);
-        console.error('Error message:', error.message);
-      }
+      await Promise.all(batchPromises);
     }
 
     setUploading(false);
 
     if (successfulUploads > 0 && failedUploads === 0) {
+      console.log(`✅ SUCCESS: All ${successfulUploads} files uploaded successfully!`);
       Alert.alert('Success', `All ${successfulUploads} files uploaded successfully to selected accounts!`);
       setSelectedMedia(prev => prev.filter(media => media.status !== 'completed'));
       if (getSelectedMedia().length === 0) setModalVisible(false);
     } else if (successfulUploads > 0) {
+      console.log(`⚠️ PARTIAL: ${successfulUploads} successful, ${failedUploads} failed`);
       Alert.alert(
         'Upload Complete',
         `${successfulUploads} files uploaded successfully, ${failedUploads} failed.`,
@@ -236,8 +250,137 @@ const UploadScreen: React.FC = () => {
       );
       setSelectedMedia(prev => prev.filter(media => media.status !== 'completed'));
     } else {
+      console.log(`❌ FAILED: All ${failedUploads} files failed to upload`);
       Alert.alert('Upload Failed', 'All files failed to upload. Please try again.');
     }
+  };
+
+  const uploadMediaToAccounts = async (media: MediaFile, accountIds: string[]): Promise<{ success: boolean }> => {
+    try {
+      for (const accountId of accountIds) {
+        await uploadMediaWithRetry(media, accountId);
+        await new Promise(resolve => setTimeout(resolve, 1000));
+      }
+      
+      setSelectedMedia(prev =>
+        prev.map(m => m.id === media.id ? { ...m, status: 'completed' } : m)
+      );
+      console.log(`✅ File "${media.name}" uploaded successfully to all accounts`);
+      return { success: true };
+    } catch (error) {
+      console.error(`❌ Upload failed for "${media.name}":`, error);
+      setSelectedMedia(prev =>
+        prev.map(m => m.id === media.id ? { ...m, status: 'failed' } : m)
+      );
+      return { success: false };
+    }
+  };
+
+  const uploadMediaWithRetry = async (media: MediaFile, accountId: string, retryCount = 0): Promise<void> => {
+    try {
+      if (media.size > CHUNK_SIZE) {
+        console.log(`[CHUNKED] Using chunked upload for "${media.name}" (${formatFileSize(media.size)})`);
+        await uploadInChunks(media, accountId);
+      } else {
+        console.log(`[SINGLE] Using single upload for "${media.name}" (${formatFileSize(media.size)})`);
+        await uploadSingleFile(media, accountId);
+      }
+      console.log(`[SUCCESS] Successfully uploaded "${media.name}" to account ${accountId}`);
+    } catch (error) {
+      if (retryCount < MAX_RETRIES) {
+        console.log(`[RETRY] Retrying upload for "${media.name}" (attempt ${retryCount + 1}/${MAX_RETRIES})`);
+        await new Promise(resolve => setTimeout(resolve, 2000 * (retryCount + 1)));
+        return uploadMediaWithRetry(media, accountId, retryCount + 1);
+      } else {
+        console.log(`[ERROR] All retries failed for "${media.name}":`, error);
+        throw error;
+      }
+    }
+  };
+
+  const uploadSingleFile = async (media: MediaFile, accountId: string): Promise<void> => {
+    const formData = new FormData();
+    formData.append('file', {
+      uri: media.uri,
+      type: media.type === 'image' ? 'image/jpeg' : 'video/mp4',
+      name: media.name,
+    } as any);
+    formData.append('account_id', accountId);
+    formData.append('platform', platform);
+    formData.append('user_id', user.Id.toString());
+
+    const response = await ApiService.uploadMedia(formData);
+    
+    if (!response.message && !response.file_id) {
+      throw new Error(response.error || 'Upload failed without specific error');
+    }
+  };
+
+  const uploadInChunks = async (media: MediaFile, accountId: string): Promise<void> => {
+    const fileInfo = await FileSystem.getInfoAsync(media.uri);
+    if (!fileInfo.exists) throw new Error('File not found');
+
+    const totalChunks = Math.ceil(media.size / CHUNK_SIZE);
+    let uploadId = `${media.id}-${Date.now()}`;
+
+    console.log(`[START] Starting chunked upload for "${media.name}": ${totalChunks} chunks`);
+
+    for (let chunkIndex = 0; chunkIndex < totalChunks; chunkIndex++) {
+      const start = chunkIndex * CHUNK_SIZE;
+      const end = Math.min(start + CHUNK_SIZE, media.size);
+      
+      const chunkData = await FileSystem.readAsStringAsync(media.uri, {
+        encoding: FileSystem.EncodingType.Base64,
+        position: start,
+        length: end - start,
+      } as any);
+
+      const chunkFormData = new FormData();
+      chunkFormData.append('chunk', {
+        uri: `data:${media.type === 'image' ? 'image/jpeg' : 'video/mp4'};base64,${chunkData}`,
+        type: media.type === 'image' ? 'image/jpeg' : 'video/mp4',
+        name: `${media.name}.part${chunkIndex}`,
+      } as any);
+      chunkFormData.append('account_id', accountId);
+      chunkFormData.append('platform', platform);
+      chunkFormData.append('user_id', user.Id.toString());
+      chunkFormData.append('chunk_index', chunkIndex.toString());
+      chunkFormData.append('total_chunks', totalChunks.toString());
+      chunkFormData.append('upload_id', uploadId);
+      chunkFormData.append('original_name', media.name);
+
+      try {
+        await ApiService.uploadMediaChunk(chunkFormData);
+        
+        setChunkProgress(prev => ({
+          ...prev,
+          [media.id]: { uploaded: chunkIndex + 1, total: totalChunks }
+        }));
+
+        const chunkProgressValue = ((chunkIndex + 1) / totalChunks) * 100;
+        setUploadProgress(prev => ({
+          ...prev,
+          [media.id]: Math.min(prev[media.id] || 0, chunkProgressValue)
+        }));
+
+        console.log(`[CHUNK] Chunk ${chunkIndex + 1}/${totalChunks} uploaded for "${media.name}"`);
+
+      } catch (error) {
+        console.log(`[ERROR] Chunk ${chunkIndex} upload failed for "${media.name}":`, error);
+        throw error;
+      }
+    }
+
+    const finalizeFormData = new FormData();
+    finalizeFormData.append('upload_id', uploadId);
+    finalizeFormData.append('account_id', accountId);
+    finalizeFormData.append('platform', platform);
+    finalizeFormData.append('user_id', user.Id.toString());
+    finalizeFormData.append('original_name', media.name);
+    finalizeFormData.append('total_chunks', totalChunks.toString());
+
+    await ApiService.finalizeUpload(finalizeFormData);
+    console.log(`[FINAL] All chunks finalized for "${media.name}"`);
   };
 
   const getSelectedAccountNames = () => {
@@ -265,22 +408,97 @@ const UploadScreen: React.FC = () => {
     });
   };
 
-  const getStatusColor = (status: MediaFile['status']) => {
-    switch (status) {
-      case 'completed': return '#34C759';
-      case 'uploading': return '#007AFF';
-      case 'failed': return '#FF3B30';
-      default: return '#8E8E93';
-    }
+  const MediaItem = ({ item }: { item: MediaFile }) => {
+    const currentChunkProgress = chunkProgress[item.id];
+    
+    const getStatusDisplay = () => {
+      switch (item.status) {
+        case 'completed': return { text: 'Completed', color: '#34C759', icon: '✓' };
+        case 'uploading': return { text: 'Uploading', color: '#007AFF', icon: '↻' };
+        case 'failed': return { text: 'Failed', color: '#FF3B30', icon: '✗' };
+        default: return { text: 'Pending', color: '#8E8E93', icon: '…' };
+      }
+    };
+
+    const status = getStatusDisplay();
+    
+    return (
+      <TouchableOpacity
+        style={[
+          styles.mediaItem,
+          item.selected && styles.mediaItemSelected,
+        ]}
+        onPress={() => toggleMediaSelection(item.id)}
+        onLongPress={() => removeMedia(item.id)}
+      >
+        <View style={styles.checkboxContainer}>
+          <View style={[
+            styles.checkbox,
+            item.selected && styles.checkboxSelected,
+          ]}>
+            {item.selected && (
+              <View style={styles.checkboxTick}>
+                <Text style={styles.checkboxTickText}>✓</Text>
+              </View>
+            )}
+          </View>
+        </View>
+        <View style={styles.mediaPreview}>
+          {item.type === 'image' ? (
+            <Image source={{ uri: item.uri }} style={styles.mediaThumbnail} />
+          ) : (
+            <View style={[styles.mediaThumbnail, styles.videoThumbnail]}>
+              <Text style={styles.videoIcon}>▶</Text>
+            </View>
+          )}
+        </View>
+        <View style={styles.mediaInfo}>
+          <Text style={styles.mediaName} numberOfLines={1}>{item.name}</Text>
+          <Text style={styles.fileSize}>{formatFileSize(item.size)}</Text>
+          
+          <View style={styles.statusContainer}>
+            <View style={styles.statusWithIcon}>
+              <Text style={styles.statusIcon}>{status.icon}</Text>
+              <Text style={[styles.statusText, { color: status.color }]}>
+                {status.text}
+              </Text>
+            </View>
+            {item.status === 'uploading' && uploadProgress[item.id] && (
+              <Text style={styles.progressText}>{Math.round(uploadProgress[item.id])}%</Text>
+            )}
+          </View>
+          
+          {currentChunkProgress && (
+            <Text style={styles.chunkProgressText}>
+              Chunk: {currentChunkProgress.uploaded}/{currentChunkProgress.total}
+            </Text>
+          )}
+          
+          {item.status === 'uploading' && (
+            <View style={styles.progressBar}>
+              <View style={[styles.progressFill, { width: `${uploadProgress[item.id] || 0}%` }]} />
+            </View>
+          )}
+        </View>
+        <TouchableOpacity
+          style={styles.removeMediaButton}
+          onPress={() => removeMedia(item.id)}
+          disabled={item.status === 'uploading'}
+        >
+          <View style={styles.removeMediaButtonInner}>
+            <Text style={styles.removeMediaText}>×</Text>
+          </View>
+        </TouchableOpacity>
+      </TouchableOpacity>
+    );
   };
 
-  const getStatusIcon = (status: MediaFile['status']) => {
-    switch (status) {
-      case 'completed': return '✅';
-      case 'uploading': return '🔄';
-      case 'failed': return '❌';
-      default: return '⏳';
-    }
+  const formatFileSize = (bytes: number): string => {
+    if (bytes === 0) return '0 B';
+    const k = 1024;
+    const sizes = ['B', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
   };
 
   const renderAccountSelection = () => {
@@ -310,7 +528,11 @@ const UploadScreen: React.FC = () => {
                 styles.checkbox,
                 selectedAccounts.includes(item.id.toString()) && styles.checkboxSelected,
               ]}>
-                {selectedAccounts.includes(item.id.toString()) && <Text style={styles.checkboxTick}>✓</Text>}
+                {selectedAccounts.includes(item.id.toString()) && (
+                  <View style={styles.checkboxTick}>
+                    <Text style={styles.checkboxTickText}>✓</Text>
+                  </View>
+                )}
               </View>
               <Text style={styles.accountItemText}>{getAccountDisplayName(item)}</Text>
             </TouchableOpacity>
@@ -319,58 +541,6 @@ const UploadScreen: React.FC = () => {
       </View>
     );
   };
-
-  const MediaItem = ({ item }: { item: MediaFile }) => (
-    <TouchableOpacity
-      style={[
-        styles.mediaItem,
-        item.selected && styles.mediaItemSelected,
-      ]}
-      onPress={() => toggleMediaSelection(item.id)}
-      onLongPress={() => removeMedia(item.id)}
-    >
-      <View style={styles.checkboxContainer}>
-        <View style={[
-          styles.checkbox,
-          item.selected && styles.checkboxSelected,
-        ]}>
-          {item.selected && <Text style={styles.checkboxTick}>✓</Text>}
-        </View>
-      </View>
-      <View style={styles.mediaPreview}>
-        {item.type === 'image' ? (
-          <Image source={{ uri: item.uri }} style={styles.mediaThumbnail} />
-        ) : (
-          <View style={[styles.mediaThumbnail, styles.videoThumbnail]}>
-            <Text style={styles.videoIcon}>🎥</Text>
-          </View>
-        )}
-      </View>
-      <View style={styles.mediaInfo}>
-        <Text style={styles.mediaName} numberOfLines={1}>{item.name}</Text>
-        <View style={styles.statusContainer}>
-          <Text style={[styles.statusText, { color: getStatusColor(item.status) }]}>
-            {getStatusIcon(item.status)} {item.status.charAt(0).toUpperCase() + item.status.slice(1)}
-          </Text>
-          {item.status === 'uploading' && uploadProgress[item.id] && (
-            <Text style={styles.progressText}>{uploadProgress[item.id]}%</Text>
-          )}
-        </View>
-        {item.status === 'uploading' && (
-          <View style={styles.progressBar}>
-            <View style={[styles.progressFill, { width: `${uploadProgress[item.id] || 0}%` }]} />
-          </View>
-        )}
-      </View>
-      <TouchableOpacity
-        style={styles.removeMediaButton}
-        onPress={() => removeMedia(item.id)}
-        disabled={item.status === 'uploading'}
-      >
-        <Text style={styles.removeMediaText}>×</Text>
-      </TouchableOpacity>
-    </TouchableOpacity>
-  );
 
   const canOpenModal = selectedAccounts.length > 0 && accounts.length > 0;
   const selectedMediaCount = getSelectedMedia().length;
@@ -661,6 +831,28 @@ const styles = StyleSheet.create({
     color: '#333',
     marginLeft: 10,
   },
+  checkbox: {
+    width: 20,
+    height: 20,
+    borderRadius: 4,
+    borderWidth: 2,
+    borderColor: '#ccc',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  checkboxSelected: {
+    backgroundColor: '#007AFF',
+    borderColor: '#007AFF',
+  },
+  checkboxTick: {
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  checkboxTickText: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: 'bold',
+  },
   uploadSection: {
     marginBottom: 20,
   },
@@ -812,24 +1004,6 @@ const styles = StyleSheet.create({
   checkboxContainer: {
     marginRight: 10,
   },
-  checkbox: {
-    width: 20,
-    height: 20,
-    borderRadius: 4,
-    borderWidth: 2,
-    borderColor: '#ccc',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  checkboxSelected: {
-    backgroundColor: '#007AFF',
-    borderColor: '#007AFF',
-  },
-  checkboxTick: {
-    color: '#fff',
-    fontSize: 12,
-    fontWeight: 'bold',
-  },
   mediaPreview: {
     marginRight: 12,
   },
@@ -844,7 +1018,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   videoIcon: {
-    fontSize: 20,
+    fontSize: 16,
+    color: '#666',
+    fontWeight: 'bold',
   },
   mediaInfo: {
     flex: 1,
@@ -853,12 +1029,25 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#333',
     fontWeight: '500',
+    marginBottom: 2,
+  },
+  fileSize: {
+    fontSize: 12,
+    color: '#666',
     marginBottom: 4,
   },
   statusContainer: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
+  },
+  statusWithIcon: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  statusIcon: {
+    fontSize: 12,
   },
   statusText: {
     fontSize: 12,
@@ -868,6 +1057,11 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#007AFF',
     fontWeight: '500',
+  },
+  chunkProgressText: {
+    fontSize: 11,
+    color: '#666',
+    marginTop: 2,
   },
   progressBar: {
     height: 3,
@@ -883,6 +1077,12 @@ const styles = StyleSheet.create({
   },
   removeMediaButton: {
     padding: 4,
+  },
+  removeMediaButtonInner: {
+    width: 24,
+    height: 24,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   removeMediaText: {
     color: '#FF3B30',
@@ -965,4 +1165,9 @@ const styles = StyleSheet.create({
   },
 });
 
-export default UploadScreen; 
+
+
+
+
+
+export default UploadScreen;

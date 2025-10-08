@@ -312,6 +312,45 @@ export class ApiService {
     }
   }
 
+
+  static async uploadMediaChunk(formData: FormData): Promise<ApiResponse> {
+  try {
+    const response: AxiosResponse<ApiResponse> = await api.post('/upload-media-chunk', formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data',
+      },
+      timeout: 60000, // 60 seconds for chunks
+    });
+    return response.data;
+  } catch (error: any) {
+    throw new Error(error.response?.data?.error || 'Chunk upload failed');
+  }
+}
+
+static async finalizeUpload(formData: FormData): Promise<ApiResponse> {
+  try {
+    const response: AxiosResponse<ApiResponse> = await api.post('/finalize-upload', formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data',
+      },
+    });
+    return response.data;
+  } catch (error: any) {
+    throw new Error(error.response?.data?.error || 'Upload finalization failed');
+  }
+}
+
+static async getUploadStatus(uploadId: string): Promise<any> {
+  try {
+    const response: AxiosResponse<any> = await api.get(`/upload-status/${uploadId}`);
+    return response.data;
+  } catch (error: any) {
+    throw new Error(error.response?.data?.error || 'Failed to get upload status');
+  }
+}
+
+
+
   static async getScheduleStatus(platform: 'instagram' | 'telegram' | 'facebook' | 'youtube' | 'both', email?: string): Promise<any> {
     try {
       const params: any = { platform };
