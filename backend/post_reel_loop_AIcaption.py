@@ -17,6 +17,11 @@ import mysql.connector
 from google.auth.transport.requests import Request
 from dotenv import load_dotenv
 
+# Hugging Face Transformers for AI caption generation
+from transformers import BlipProcessor, BlipForConditionalGeneration
+from PIL import Image
+import torch
+
 # Load environment variables from .env file
 load_dotenv()
 
@@ -33,21 +38,173 @@ DB_CONFIG = {
     "password": os.getenv("DB_PASSWORD"),
     "port": int(os.getenv("DB_PORT"))
 }
-ACTIVE_COUNTDOWN_SECONDS = 300  # 5 minutes
-IDLE_SLEEP_MINUTES = 0.3  # How long to wait if no accounts are scheduled
-RESCHEDULE_THRESHOLD_MINUTES = 15  # If wait time exceeds this, run scheduler and restart
-
+ACTIVE_COUNTDOWN_SECONDS = 300
+IDLE_SLEEP_MINUTES = 0.3
+RESCHEDULE_THRESHOLD_MINUTES = 15
 over_time = 1
 
-# In-memory cache for credentials to avoid redundant database queries
+# In-memory cache for credentials
 _credentials_cache = {}
+
+# AI Model for caption generation
+processor = None
+model = None
+
+# --- User-Friendly Logging Functions ---
+def print_step(message):
+    print(f"→ {message}")
+
+def print_success(message):
+    print(f"✓ {message}")
+
+def print_error(message):
+    print(f"✗ {message}")
+
+def print_warning(message):
+    print(f"⚠ {message}")
+
+def print_info(message):
+    print(f"ℹ {message}")
+
+def print_header(title):
+    print(f"\n{'━' * 60}")
+    print(f" {title}")
+    print(f"{'━' * 60}")
+
+def print_countdown(message):
+    print(f"⏰ {message}", end='\r')
+
+# --- AI Caption Generation Functions ---
+def load_caption_model():
+    global processor, model
+    try:
+        print_step("Loading AI caption model...")
+        processor = BlipProcessor.from_pretrained("Salesforce/blip-image-captioning-base")
+        model = BlipForConditionalGeneration.from_pretrained("Salesforce/blip-image-captioning-base")
+        print_success("AI caption model ready")
+    except Exception as e:
+        print_error(f"Failed to load AI model: {str(e)}")
+
+def generate_caption_from_image(image_path):
+    global processor, model
+    
+    if processor is None or model is None:
+        load_caption_model()
+        if processor is None or model is None:
+            return get_fallback_caption()
+    
+    try:
+        image = Image.open(image_path).convert('RGB')
+        inputs = processor(image, return_tensors="pt")
+        
+        with torch.no_grad():
+            out = model.generate(**inputs, max_length=50, num_beams=5, early_stopping=True)
+        
+        caption = processor.decode(out[0], skip_special_tokens=True)
+        hashtags = generate_smart_hashtags(caption)
+        
+        final_caption = f"{caption}\n\n{hashtags}"
+        print_success(f"Caption: {caption}")
+        return final_caption
+        
+    except Exception as e:
+        print_error(f"AI caption failed: {str(e)}")
+        return get_fallback_caption()
+
+def generate_caption_from_video(video_path):
+    try:
+        frame_path = os.path.join(TEMP_FOLDER, "video_frame.jpg")
+        
+        try:
+            ffmpeg.input(video_path, ss=1).output(frame_path, vframes=1).run(overwrite_output=True, quiet=True)
+            
+            if os.path.exists(frame_path):
+                caption = generate_caption_from_image(frame_path)
+                try:
+                    os.remove(frame_path)
+                except:
+                    pass
+                return caption
+            else:
+                return get_fallback_caption()
+                
+        except Exception as e:
+            print_error(f"Could not extract video frame: {str(e)}")
+            return get_fallback_caption()
+            
+    except Exception as e:
+        print_error(f"Video caption failed: {str(e)}")
+        return get_fallback_caption()
+
+def generate_smart_hashtags(caption):
+    words = re.findall(r'\b\w+\b', caption.lower())
+    
+    stop_words = {
+        'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 
+        'of', 'with', 'by', 'as', 'is', 'are', 'was', 'were', 'be', 'been', 
+        'being', 'have', 'has', 'had', 'do', 'does', 'did', 'will', 'would', 
+        'could', 'should', 'may', 'might', 'must', 'can', 'this', 'that', 
+        'these', 'those', 'i', 'you', 'he', 'she', 'it', 'we', 'they', 'me',
+        'him', 'her', 'us', 'them', 'my', 'your', 'his', 'its', 'our', 'their'
+    }
+    
+    meaningful_words = []
+    for word in words:
+        if (word not in stop_words and 
+            len(word) > 3 and 
+            word.isalpha() and
+            word not in meaningful_words):
+            meaningful_words.append(word)
+    
+    hashtags = [f"#{word}" for word in meaningful_words[:8]]
+    
+    generic_hashtags = [
+        "instagram", "photooftheday", "instagood", "picoftheday", 
+        "beautiful", "art", "nature", "love", "happy", "life"
+    ]
+    
+    for tag in generic_hashtags:
+        if tag not in meaningful_words and len(hashtags) < 15:
+            hashtags.append(f"#{tag}")
+    
+    return " ".join(hashtags[:15])
+
+def get_fallback_caption():
+    fallback_captions = [
+        "Capturing beautiful moments and sharing them with the world",
+        "Life through my lens - every picture tells a story",
+        "Finding beauty in everyday moments and sharing them with you",
+        "Creative expression through photography and visual storytelling",
+        "Exploring the world one photo at a time"
+    ]
+    
+    import random
+    base_caption = random.choice(fallback_captions)
+    hashtags = "#instagram #photography #instagood #picoftheday #beautiful #art #nature"
+    
+    return f"{base_caption}\n\n{hashtags}"
+
+def get_auto_caption(media_path, is_video=False):
+    try:
+        print_step(f"Creating caption for {os.path.basename(media_path)}...")
+        
+        if is_video:
+            caption = generate_caption_from_video(media_path)
+        else:
+            caption = generate_caption_from_image(media_path)
+        
+        return caption
+        
+    except Exception as e:
+        print_error(f"Auto-caption failed: {str(e)}")
+        return get_fallback_caption()
 
 # --- Database Functions ---
 def get_db_connection():
     try:
         return mysql.connector.connect(**DB_CONFIG)
     except mysql.connector.Error as e:
-        print(f"ERROR: Database connection failed: {str(e)}")
+        print_error(f"Database connection failed: {str(e)}")
         return None
 
 def get_next_scheduled_account():
@@ -85,7 +242,7 @@ def update_account_after_post(account_id):
     conn.commit()
     cursor.close()
     conn.close()
-    print(f"DB Updated for Account ID {account_id}: posts_left is now {posts_left}, done is '{done_status}'.")
+    print_success(f"Account updated - Posts left: {posts_left}")
 
 # --- Helper Functions ---
 def get_instagram_session(account):
@@ -94,11 +251,12 @@ def get_instagram_session(account):
         try:
             cl.set_settings(json.loads(account['token_sesson']))
             sleep(2)
-            print(f"Loaded Instagram session for {account['username']}.")
+            print_success(f"Session restored for {account['username']}")
             return cl
         except Exception as e:
-            print(f"Invalid session for {account['username']}, attempting login: {str(e)}")
+            print_warning(f"Session expired, logging in again: {str(e)}")
     try:
+        print_step(f"Logging into Instagram as {account['username']}...")
         cl.login(account['username'], account['passwand'])
         session = cl.get_settings()
         conn = get_db_connection()
@@ -107,86 +265,81 @@ def get_instagram_session(account):
         conn.commit()
         cursor.close()
         conn.close()
-        print(f"Logged in and saved new session for {account['username']}.")
+        print_success(f"Logged in successfully as {account['username']}")
         return cl
     except Exception as e:
-        print(f"ERROR: Login failed for {account['username']}: {str(e)}")
+        print_error(f"Login failed: {str(e)}")
         return None
 
 def save_drive_token(creds, account_id):
-    """Save Google Drive token to database."""
     try:
         conn = get_db_connection()
         if not conn:
-            print(f"ERROR: Failed to save token for account ID {account_id}: No database connection")
+            print_error(f"Could not save Drive token: No database connection")
             return False
         cursor = conn.cursor()
         cursor.execute("UPDATE instagram SET token_drive = %s WHERE id = %s", (creds.to_json(), account_id))
         conn.commit()
         cursor.close()
         conn.close()
-        print(f"Saved Google Drive token to database for account ID {account_id}")
+        print_success("Drive token saved")
         return True
     except Exception as e:
-        print(f"ERROR: Failed to save token for account ID {account_id}: {str(e)}")
+        print_error(f"Failed to save Drive token: {str(e)}")
         return False
 
 def get_drive_credentials(account, max_retries=3):
-    """Retrieve or refresh Google Drive credentials with retry logic, storing only in database."""
     global _credentials_cache
     account_id = account['id']
     username = account['username']
 
-    # Check in-memory cache first
     if account_id in _credentials_cache and _credentials_cache[account_id].valid:
-        print(f"Using cached credentials for {username}")
+        print_success("Using cached Drive credentials")
         return _credentials_cache[account_id]
 
-    # Load from database
     creds = None
     if account['token_drive']:
         try:
             token_str = account['token_drive'].strip('"').replace('\\"', '"').replace("\\'", "'")
             token_data = json.loads(token_str)
             creds = Credentials.from_authorized_user_info(token_data, SCOPES)
-            print(f"Loaded Google Drive credentials from database for {username}")
+            print_success("Drive credentials loaded")
         except (json.JSONDecodeError, KeyError, ValueError) as e:
-            print(f"ERROR: Invalid token_drive JSON for {username}: {str(e)}")
+            print_error(f"Invalid Drive token: {str(e)}")
             creds = None
 
-    # Refresh token if expired
     if creds and creds.expired and creds.refresh_token:
         for attempt in range(max_retries):
             try:
                 creds.refresh(Request())
-                print(f"Refreshed Google Drive token for {username}")
+                print_success("Drive token refreshed")
                 if save_drive_token(creds, account_id):
                     _credentials_cache[account_id] = creds
                 return creds
             except Exception as e:
-                print(f"ERROR: Refresh attempt {attempt + 1}/{max_retries} failed for {username}: {str(e)}")
+                print_warning(f"Token refresh failed (attempt {attempt + 1}/{max_retries}): {str(e)}")
                 if attempt < max_retries - 1:
-                    sleep(5)  # Wait before retrying
+                    sleep(5)
                 else:
-                    print(f"ERROR: Max refresh retries reached for {username}. Attempting re-authentication.")
+                    print_error("Max refresh attempts reached")
                     creds = None
 
-    # Re-authenticate if no valid credentials
     if not creds or not creds.valid:
         if not os.path.exists('credentials.json'):
-            print(f"ERROR: credentials.json not found for {username}. Skipping account.")
+            print_error("Google Drive credentials file not found")
             return None
         try:
+            print_step("Setting up Google Drive access...")
             flow = InstalledAppFlow.from_client_secrets_file('credentials.json', SCOPES)
             creds = flow.run_local_server(port=0)
             if save_drive_token(creds, account_id):
                 _credentials_cache[account_id] = creds
-                print(f"Obtained new Google Drive token for {username}")
+                print_success("Google Drive connected")
             else:
-                print(f"ERROR: Failed to save new token for {username}. Skipping account.")
+                print_error("Failed to save new Drive token")
                 return None
         except Exception as e:
-            print(f"ERROR: Failed to obtain new Google Drive token for {username}: {str(e)}")
+            print_error(f"Google Drive setup failed: {str(e)}")
             return None
 
     return creds
@@ -197,7 +350,7 @@ def extract_folder_id(drive_link):
     match = re.search(r'folders/([a-zA-Z0-9_-]+)', drive_link)
     if match:
         return match.group(1)
-    print(f"ERROR: Invalid Google Drive folder link: {drive_link}")
+    print_error(f"Invalid Google Drive link format")
     return None
 
 def create_instagram_feed_folder(creds, username):
@@ -214,19 +367,25 @@ def create_instagram_feed_folder(creds, username):
         }
         folder = drive_service.files().create(body=file_metadata, fields='id').execute()
         folder_id = folder.get('id')
-        print(f"Created 'instagram_{username}' folder with ID: {folder_id}")
+        print_success(f"Created new folder: {folder_name}")
     else:
         folder_id = folders[0]['id']
-        print(f"Found existing 'instagram_{username}' folder with ID: {folder_id}")
+        print_info(f"Using existing folder: {folder_name}")
 
     try:
-        permission = {'type': 'anyone', 'role': 'reader'}
+        # FIX: Add proper permissions to allow file deletion
+        permission = {
+            'type': 'user',
+            'role': 'writer',
+            'emailAddress': creds.service_account_email if hasattr(creds, 'service_account_email') else 'user'
+        }
         drive_service.permissions().create(fileId=folder_id, body=permission).execute()
+        
         folder = drive_service.files().get(fileId=folder_id, fields='webViewLink').execute()
         folder_link = folder.get('webViewLink')
-        print(f"Shareable link for 'instagram_{username}' folder: {folder_link}")
+        print_success("Folder permissions set up")
     except Exception as e:
-        print(f"ERROR: Failed to create shareable link: {str(e)}")
+        print_warning(f"Could not set folder permissions: {str(e)}")
         folder_link = f"https://drive.google.com/drive/folders/{folder_id}"
 
     return folder_id, folder_link
@@ -239,10 +398,9 @@ def download_from_drive(file_id, local_path, creds):
     done = False
     while not done:
         status, done = downloader.next_chunk()
-    print(f"Downloaded {file_id} to {local_path}")
+    print_success(f"Downloaded: {os.path.basename(local_path)}")
 
 def get_oldest_media_file(creds, account):
-    """Get the oldest media file from Google Drive based on creation time."""
     drive_service = build('drive', 'v3', credentials=creds)
     conn = get_db_connection()
     if not conn:
@@ -259,9 +417,9 @@ def get_oldest_media_file(creds, account):
     if drive_link and folder_id:
         try:
             drive_service.files().get(fileId=folder_id, fields='id').execute()
-            print(f"Using existing Google Drive folder link: {drive_link} for account {username}")
+            print_info("Using existing Drive folder")
         except Exception as e:
-            print(f"ERROR: Invalid or inaccessible folder ID {folder_id} for account {username}: {str(e)}. Creating new folder.")
+            print_warning(f"Folder access failed, creating new one: {str(e)}")
             folder_id, folder_link = create_instagram_feed_folder(creds, username)
             conn = get_db_connection()
             if not conn:
@@ -271,7 +429,7 @@ def get_oldest_media_file(creds, account):
             conn.commit()
             cursor.close()
             conn.close()
-            print(f"Updated Google Drive link for account {username}: {folder_link}")
+            print_success("Drive folder updated")
     else:
         folder_id, folder_link = create_instagram_feed_folder(creds, username)
         conn = get_db_connection()
@@ -282,47 +440,58 @@ def get_oldest_media_file(creds, account):
         conn.commit()
         cursor.close()
         conn.close()
-        print(f"Updated Google Drive link for account {username}: {folder_link}")
+        print_success("Drive folder created")
 
     query = f"'{folder_id}' in parents"
     results = drive_service.files().list(
         q=query, 
         fields="files(id, name, mimeType, createdTime)",
-        orderBy="createdTime"  # Get files ordered by creation time (oldest first)
+        orderBy="createdTime"
     ).execute()
     files = results.get('files', [])
 
     if not files:
-        print(f"ERROR: No media files found in folder {folder_id}")
+        print_error("No media files found in Drive folder")
         return None, None, None
 
-    # Filter for media files and get the oldest one
     oldest_file = None
     for file in files:
         if file['mimeType'].startswith('image/') or file['mimeType'].startswith('video/'):
             oldest_file = file
-            break  # Since files are sorted by creation time, first media file is oldest
+            break
 
     if not oldest_file:
-        print(f"ERROR: No valid media files found in folder {folder_id}")
+        print_error("No valid image or video files found")
         return None, None, None
 
     local_path = os.path.join(TEMP_FOLDER, oldest_file['name'])
-    print(f"Downloading oldest file: {oldest_file['name']} (created: {oldest_file['createdTime']})")
+    print_step(f"Downloading: {oldest_file['name']}")
     download_from_drive(oldest_file['id'], local_path, creds)
     
     is_video = oldest_file['mimeType'].startswith('video/')
-    return local_path, oldest_file['id'], is_video  # Return local path, file ID, and media type
+    return local_path, oldest_file['id'], is_video
 
 def delete_file_from_drive(file_id, creds):
-    """Delete a file from Google Drive."""
+    """Delete a file from Google Drive with proper permissions"""
     try:
         drive_service = build('drive', 'v3', credentials=creds)
+        
+        # FIX: First try to get the file to verify permissions
+        try:
+            file_info = drive_service.files().get(fileId=file_id, fields='id, name, permissions').execute()
+            print_info(f"Checking permissions for file deletion...")
+        except Exception as e:
+            print_error(f"Cannot access file for deletion: {str(e)}")
+            return False
+        
+        # Now delete the file
         drive_service.files().delete(fileId=file_id).execute()
-        print(f"SUCCESS: Deleted file {file_id} from Google Drive")
+        print_success("File deleted from Google Drive")
         return True
+        
     except Exception as e:
-        print(f"ERROR: Failed to delete file {file_id} from Google Drive: {str(e)}")
+        print_error(f"Could not delete file from Drive: {str(e)}")
+        print_info("Note: Make sure the Google account has 'Editor' access to the folder")
         return False
 
 def adjust_aspect_ratio(video_path, output_path):
@@ -337,13 +506,14 @@ def adjust_aspect_ratio(video_path, output_path):
          .output(output_path, vcodec='libx264', acodec='aac').run(overwrite_output=True, quiet=True))
         return True
     except Exception as e:
-        print(f"ERROR: Failed to adjust aspect ratio for {video_path}: {str(e)}")
+        print_error(f"Video adjustment failed: {str(e)}")
         return False
 
 def post_media(client, media_path, caption, is_video=True):
     try:
         media_name = os.path.basename(media_path)
-        full_caption = f"{os.path.splitext(media_name)[0]}\n\n{caption}"
+        full_caption = caption
+        
         thumbnail_path = None
         if is_video:
             thumbnail_path = os.path.splitext(media_path)[0] + "_thumb.jpg"
@@ -351,18 +521,21 @@ def post_media(client, media_path, caption, is_video=True):
                 ffmpeg.input(media_path, ss=1).output(thumbnail_path, vframes=1).run(overwrite_output=True, quiet=True)
             except ffmpeg.Error:
                 thumbnail_path = None
+        
+        print_step(f"Uploading to Instagram...")
         if is_video:
             client.clip_upload(media_path, caption=full_caption, thumbnail=thumbnail_path)
         else:
             client.photo_upload(media_path, caption=full_caption)
-        print(f"SUCCESS: Posted {media_name} to {client.username}'s account.")
+        
+        print_success(f"Posted successfully: {media_name}")
         return True
     except Exception as e:
-        print(f"ERROR: Failed to post {media_name}: {str(e)}")
+        print_error(f"Upload failed: {str(e)}")
         return False
 
 def cleanup_temp_folder():
-    print("Cleaning up temporary files...")
+    print_step("Cleaning up temporary files...")
     for filename in os.listdir(TEMP_FOLDER):
         file_path = os.path.join(TEMP_FOLDER, filename)
         max_attempts = 5
@@ -370,38 +543,37 @@ def cleanup_temp_folder():
             try:
                 if os.path.isfile(file_path):
                     os.unlink(file_path)
-                    print(f"Deleted {file_path}")
+                    print_info(f"Cleaned: {filename}")
                 break
             except Exception as e:
                 if attempt < max_attempts - 1:
-                    print(f"Failed to delete {file_path} (attempt {attempt + 1}/{max_attempts}): {str(e)}. Retrying in 3 seconds...")
                     sleep(3)
                 else:
-                    print(f"ERROR: Failed to delete {file_path} after {max_attempts} attempts: {str(e)}")
+                    print_warning(f"Could not delete: {filename}")
 
 # --- Main Execution Logic ---
 def main():
-    print("--- Continuous Instagram Worker ---")
+    print_header("Instagram Auto-Poster")
+    print_info("Starting automation service...")
+    
+    load_caption_model()
     
     if not os.path.exists(TEMP_FOLDER):
         os.makedirs(TEMP_FOLDER)
-    if not os.path.exists(CAPTION_FILE):
-        with open(CAPTION_FILE, "w", encoding="utf-8") as f:
-            f.write("#default #caption #instagood")
+        print_success(f"Created temp folder: {TEMP_FOLDER}")
     
     while True:
         account = get_next_scheduled_account()
         
         if not account:
-            print(f"No accounts currently scheduled. Waiting for {IDLE_SLEEP_MINUTES} minutes...")
+            print_info(f"No posts scheduled. Checking again in {IDLE_SLEEP_MINUTES} minutes...")
             sleep(IDLE_SLEEP_MINUTES * 60)
             continue
 
-        print("\n----------------------------------------------------")
-        print(f"Found next scheduled post:")
-        print(f"  >> User:    {account.get('user_name', 'N/A')}")
-        print(f"  >> Account: {account.get('username', 'N/A')}")
-        print("----------------------------------------------------")
+        print_header("Next Scheduled Post")
+        print(f"👤 User: {account.get('user_name', 'N/A')}")
+        print(f"📱 Account: {account.get('username', 'N/A')}")
+        print(f"⏰ Time: {account['next_post_time'].strftime('%Y-%m-%d %H:%M:%S %Z')}")
 
         # Countdown logic
         while True:
@@ -413,81 +585,80 @@ def main():
             wait_seconds = (next_post_time_aware - now_aware).total_seconds()
 
             if wait_seconds <= 0:
-                print("Time to post!")
+                print_success("Time to post!")
                 break
 
             if wait_seconds > RESCHEDULE_THRESHOLD_MINUTES * 60:
                 minutes, seconds = divmod(int(wait_seconds), 60)
-                print(f"Next post in {minutes}m {seconds}s is over {RESCHEDULE_THRESHOLD_MINUTES} minutes. Running scheduler_intagram.py in {over_time * 60} seconds and restarting...")
+                print_warning(f"Post in {minutes}m {seconds}s - Running scheduler...")
                 sleep(over_time * 60)
                 try:
                     subprocess.run(["python", os.path.join(os.path.dirname(__file__), "scheduler_combined.py")])
-                    print("Ran scheduler_intagram.py successfully.")
+                    print_success("Scheduler updated")
                 except subprocess.CalledProcessError as e:
-                    print(f"ERROR: Failed to run scheduler_intagram.py: {str(e)}")
-                print("Restarting post_reel_loop.py...")
-                # Restart the script
+                    print_error(f"Scheduler failed: {str(e)}")
                 os.execv(sys.executable, [sys.executable] + sys.argv)
             elif wait_seconds > ACTIVE_COUNTDOWN_SECONDS:
                 minutes, seconds = divmod(int(wait_seconds), 60)
-                print(f"Next post in {minutes}m {seconds}s. Waiting... (Checking every 30s)", end='\r')
+                print_countdown(f"Next post in {minutes}m {seconds}s - Monitoring...")
                 sleep(15)
             else:
                 minutes, seconds = divmod(int(wait_seconds), 60)
-                print(f"Active countdown: Post in {minutes}m {seconds}s...", end='\r')
+                print_countdown(f"Posting in {minutes}m {seconds}s...")
                 sleep(1)
 
-        # Posting logic
-        print(f"Initiating post for {account['username']}...")
+        # Posting process
+        print_header("Processing Media")
+        
         client = get_instagram_session(account)
         if not client:
-            print("ERROR: Login failed. Skipping this account and looking for the next one.")
+            print_error("Instagram login failed")
             sleep(10)
             continue
 
         creds = get_drive_credentials(account)
         if not creds:
-            print("ERROR: Google Drive credentials not valid or could not be obtained. Skipping this account.")
-            update_account_after_post(account['id'])  # Skip to avoid stalling
+            print_error("Google Drive access failed")
+            update_account_after_post(account['id'])
             sleep(10)
             continue
 
-        # Get the oldest media file
         media_to_post, drive_file_id, is_video = get_oldest_media_file(creds, account)
         if not media_to_post:
-            print(f"ERROR: No media files found in Google Drive for {account['username']}. Skipping.")
+            print_error("No media files available")
             update_account_after_post(account['id'])
             cleanup_temp_folder()
             continue
 
-        print(f"Selected oldest media to post: {os.path.basename(media_to_post)}")
+        print_success(f"Selected: {os.path.basename(media_to_post)}")
 
         post_path = media_to_post
         if is_video:
             adjusted_path = os.path.join(TEMP_FOLDER, f"adjusted_{os.path.basename(media_to_post)}")
             if adjust_aspect_ratio(media_to_post, adjusted_path):
                 post_path = adjusted_path
+                print_success("Video optimized for Instagram")
 
-        try:
-            with open(CAPTION_FILE, "r", encoding="utf-8") as f:
-                caption = f.read()
-        except FileNotFoundError:
-            caption = "#reels #instagram"
+        caption = get_auto_caption(post_path, is_video=is_video)
 
+        print_header("Uploading to Instagram")
         if post_media(client, post_path, caption, is_video=is_video):
-            # Delete from Google Drive after successful posting
+            print_header("Cleanup")
             if drive_file_id:
+                print_step("Removing file from Google Drive...")
                 if delete_file_from_drive(drive_file_id, creds):
-                    print(f"SUCCESS: File deleted from Google Drive after posting")
+                    print_success("File removed from Drive")
                 else:
-                    print(f"WARNING: File posted but could not delete from Google Drive")
+                    print_warning("File posted but could not delete from Drive")
+                    print_info("Check folder permissions in Google Drive")
             
             update_account_after_post(account['id'])
         else:
-            print("ERROR: Post failed. Database will not be updated for this run. Looking for next task.")
+            print_error("Post failed - keeping files in Drive")
 
         cleanup_temp_folder()
-        print("Task complete. Looking for the next scheduled post...")
+        print_header("Completed")
+        print_success("Ready for next post")
         sleep(2)
         subprocess.run(["python", os.path.join(os.path.dirname(__file__), "scheduler_combined.py")])
 
