@@ -1200,8 +1200,11 @@ def combine_and_upload_chunks(upload_id, account_id, platform, user_id, original
                     uploaded_file = service.files().create(
                         body=file_metadata, 
                         media_body=media, 
-                        fields='id,name,webViewLink'
+                        fields='id,name,webViewLink,createdTime'
                     ).execute()
+
+                    # Clean up duplicate files
+                    cleanup_duplicate_files(service, folder_id, original_name, uploaded_file['id'])
 
                     media.stream().close() if hasattr(media, 'stream') else None
 
@@ -1354,8 +1357,11 @@ def upload_media():
         file_metadata = {'name': file.filename or unique_filename, 'parents': [folder_id]}
         media = MediaFileUpload(temp_path, mimetype=mime_type)
         uploaded_file = service.files().create(
-            body=file_metadata, media_body=media, fields='id,name,webViewLink'
+            body=file_metadata, media_body=media, fields='id,name,webViewLink,createdTime'
         ).execute()
+
+        # Clean up duplicate files
+        cleanup_duplicate_files(service, folder_id, file.filename or unique_filename, uploaded_file['id'])
 
         # Close and clean temp file
         media.stream().close() if hasattr(media, 'stream') else None
@@ -1388,7 +1394,7 @@ def upload_media():
             "file_id": uploaded_file['id'],
             "file_name": uploaded_file['name'],
             "drive_link": uploaded_file.get('webViewLink', ''),
-            "success": True  # Add explicit success flag
+            "success": True
         }), 200
 
     except HttpError as e:
@@ -1409,6 +1415,43 @@ def upload_media():
         conn.close()
         return jsonify({"error": f"Upload failed: {str(e)}", "success": False}), 500
 
+
+
+def cleanup_duplicate_files(service, folder_id, file_name, current_file_id):
+    """Check for and delete duplicate files with the same name in the same folder."""
+    try:
+        # Search for files with the same name in the same folder
+        query = f"name = '{file_name}' and '{folder_id}' in parents and trashed = false"
+        results = service.files().list(
+            q=query,
+            spaces='drive',
+            fields='files(id, name, createdTime)'
+        ).execute()
+        
+        files = results.get('files', [])
+        
+        # If multiple files with same name exist, keep only the most recent one
+        if len(files) > 1:
+            print(f"🔍 Found {len(files)} files with name '{file_name}' in folder {folder_id}")
+            
+            # Sort files by creation time (newest first)
+            files.sort(key=lambda x: x.get('createdTime', ''), reverse=True)
+            
+            # Keep the most recent file (which should be our current upload)
+            files_to_delete = files[1:]  # All except the first (most recent)
+            
+            for file_to_delete in files_to_delete:
+                if file_to_delete['id'] != current_file_id:
+                    try:
+                        service.files().delete(fileId=file_to_delete['id']).execute()
+                        print(f"🗑️ Deleted duplicate file: {file_to_delete['id']} ({file_name})")
+                    except Exception as e:
+                        print(f"⚠️ Failed to delete duplicate file {file_to_delete['id']}: {str(e)}")
+            
+            print(f"✅ Cleaned up {len(files_to_delete)} duplicate files")
+            
+    except Exception as e:
+        print(f"❌ Error during duplicate cleanup: {str(e)}")
 
 @app.route('/instagram/<int:record_id>', methods=['DELETE'])
 def delete_instagram(record_id):

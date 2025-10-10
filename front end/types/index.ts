@@ -132,7 +132,18 @@ export interface DashboardData {
   postsToday: number;
   recentPosts: RecentPost[];
 }
-
+// Add this to your existing types.ts file
+export interface UploadResponse extends ApiResponse {
+  success?: boolean;
+  file_id?: string;
+  drive_link?: string;
+  file_name?: string;
+  chunk_index?: number;
+  uploaded_chunks?: number;
+  total_chunks?: number;
+  upload_id?: string;
+  status?: string;
+}
 export interface RecentPost {
   id: number;
   platform: 'instagram' | 'telegram' | 'facebook' | 'youtube';

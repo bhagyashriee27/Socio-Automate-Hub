@@ -16,7 +16,7 @@ import * as FileSystem from 'expo-file-system/legacy';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import ApiService from '../services/api';
 import StorageService from '../utils/storage';
-import { InstagramAccount, TelegramAccount, FacebookAccount, YouTubeAccount } from '../types';
+import { InstagramAccount, TelegramAccount, FacebookAccount, YouTubeAccount, ApiResponse } from '../types';
 
 interface MediaFile {
   id: string;
@@ -36,8 +36,16 @@ interface ChunkProgress {
   [key: string]: { uploaded: number; total: number };
 }
 
+// Extended interface for upload responses
+interface UploadResponse extends ApiResponse {
+  success?: boolean;
+  file_id?: string;
+  drive_link?: string;
+  file_name?: string;
+}
+
 const CHUNK_SIZE = 2 * 1024 * 1024;
-const MAX_RETRIES = 10;
+const MAX_RETRIES = 12;
 
 const UploadScreen: React.FC = () => {
   const [platform, setPlatform] = useState<'instagram' | 'telegram' | 'facebook' | 'youtube'>('instagram');
@@ -108,16 +116,32 @@ const UploadScreen: React.FC = () => {
   };
 
   const updateScheduledDateTime = (date: Date | null, time: Date | null) => {
-    if (date && time) {
-      const scheduledDate = new Date(date);
-      scheduledDate.setHours(time.getHours());
-      scheduledDate.setMinutes(time.getMinutes());
-      scheduledDate.setSeconds(0);
-      
-      const formattedDateTime = scheduledDate.toISOString().slice(0, 19).replace('T', ' ');
-      setScheduledDateTime(formattedDateTime);
-    }
-  };
+  if (date && time) {
+    // Create a new date combining both date and time
+    const scheduledDate = new Date(date);
+    
+    // Set the time components directly without timezone conversion
+    scheduledDate.setHours(time.getHours());
+    scheduledDate.setMinutes(time.getMinutes());
+    scheduledDate.setSeconds(0);
+    scheduledDate.setMilliseconds(0);
+    
+    // Format to ISO string without timezone conversion
+    const year = scheduledDate.getFullYear();
+    const month = String(scheduledDate.getMonth() + 1).padStart(2, '0');
+    const day = String(scheduledDate.getDate()).padStart(2, '0');
+    const hours = String(scheduledDate.getHours()).padStart(2, '0');
+    const minutes = String(scheduledDate.getMinutes()).padStart(2, '0');
+    const seconds = String(scheduledDate.getSeconds()).padStart(2, '0');
+    
+    const formattedDateTime = `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
+    setScheduledDateTime(formattedDateTime);
+    
+    console.log('Selected Date:', date.toDateString());
+    console.log('Selected Time:', time.toTimeString());
+    console.log('Combined DateTime:', formattedDateTime);
+  }
+};
 
   const pickMultipleMedia = async (mediaType: 'images' | 'videos' | 'all') => {
     try {
@@ -127,7 +151,7 @@ const UploadScreen: React.FC = () => {
         return;
       }
 
-      // Fixed: Use the new MediaTypeOptions instead of MediaTypeOptionsOptions
+      // Use MediaTypeOptions as requested
       let mediaTypes: any = ImagePicker.MediaTypeOptions.All;
       if (mediaType === 'images') {
         mediaTypes = ImagePicker.MediaTypeOptions.Images;
@@ -478,10 +502,32 @@ const UploadScreen: React.FC = () => {
       formData.append('scheduled_datetime', media.scheduledDatetime);
     }
 
-    const response = await ApiService.uploadMedia(formData);
-    
-    if (!response.message && !response.file_id) {
-      throw new Error(response.error || 'Upload failed without specific error');
+    try {
+      const response = await ApiService.uploadMedia(formData) as UploadResponse;
+      
+      // Type-safe success detection
+      const isSuccess = 
+        (response as any).success === true || 
+        (response.message && (response.message.includes('success') || response.message.includes('queued'))) || 
+        response.file_id || 
+        (response as any).drive_link;
+      
+      if (!isSuccess) {
+        throw new Error(response.error || 'Upload failed without specific error');
+      }
+      
+      console.log(`[API RESPONSE] Upload successful for "${media.name}":`, response);
+      
+    } catch (error: any) {
+      console.error(`[API ERROR] Upload failed for "${media.name}":`, error);
+      
+      // Check if this is actually a successful upload with misleading error
+      if (error.message?.includes('success') || (error.response?.data as any)?.file_id) {
+        console.log(`[SUCCESS DETECTED] Upload was actually successful for "${media.name}"`);
+        return; // Treat as success
+      }
+      
+      throw error;
     }
   };
 
@@ -528,7 +574,12 @@ const UploadScreen: React.FC = () => {
       }
 
       try {
-        await ApiService.uploadMediaChunk(chunkFormData);
+        const response = await ApiService.uploadMediaChunk(chunkFormData) as UploadResponse;
+        
+        // Check if chunk upload was successful
+        if (!(response as any).success && !response.message?.includes('success')) {
+          throw new Error(response.error || 'Chunk upload failed');
+        }
         
         setChunkProgress(prev => ({
           ...prev,
@@ -564,8 +615,19 @@ const UploadScreen: React.FC = () => {
       finalizeFormData.append('scheduled_datetime', media.scheduledDatetime);
     }
 
-    await ApiService.finalizeUpload(finalizeFormData);
-    console.log(`[FINAL] All chunks finalized for "${media.name}"`);
+    try {
+      const response = await ApiService.finalizeUpload(finalizeFormData) as UploadResponse;
+      
+      // Check if finalization was successful
+      if (!(response as any).success && !response.message?.includes('started')) {
+        throw new Error(response.error || 'Upload finalization failed');
+      }
+      
+      console.log(`[FINAL] All chunks finalized for "${media.name}"`);
+    } catch (error) {
+      console.log(`[FINAL ERROR] Finalization failed for "${media.name}":`, error);
+      throw error;
+    }
   };
 
   const getSelectedAccountNames = () => {
@@ -593,6 +655,19 @@ const UploadScreen: React.FC = () => {
     });
   };
 
+
+
+
+
+
+
+
+
+
+
+
+
+  
   const MediaItem = ({ item }: { item: MediaFile }) => {
     const currentChunkProgress = chunkProgress[item.id];
     
@@ -1019,51 +1094,66 @@ const UploadScreen: React.FC = () => {
                     style={styles.pickerButton}
                     onPress={() => setShowTimePicker(true)}
                   >
-                    <Text style={styles.pickerButtonText}>
-                      {selectedTime ? selectedTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'Select Time'}
-                    </Text>
+<Text style={styles.pickerButtonText}>
+  {selectedTime ? 
+    selectedTime.toLocaleTimeString([], { 
+      hour: '2-digit', 
+      minute: '2-digit',
+      hour12: true 
+    }) 
+    : 'Select Time'
+  }
+</Text>
                   </TouchableOpacity>
                 </View>
 
                 {scheduledDateTime && (
-                  <View style={styles.selectedDateTimeContainer}>
-                    <Text style={styles.selectedDateTimeLabel}>Scheduled for:</Text>
-                    <Text style={styles.selectedDateTimeText}>
-                      {new Date(scheduledDateTime).toLocaleString()}
-                    </Text>
-                  </View>
-                )}
+  <View style={styles.selectedDateTimeContainer}>
+    <Text style={styles.selectedDateTimeLabel}>Scheduled for:</Text>
+    <Text style={styles.selectedDateTimeText}>
+      {new Date(scheduledDateTime).toLocaleString()}
+    </Text>
+  </View>
+)}
 
                 {showDatePicker && (
-                  <DateTimePicker
-                    value={selectedDate || new Date()}
-                    mode="date"
-                    display={Platform.OS === 'ios' ? 'spinner' : 'default'}
-                    onChange={(event, date) => {
-                      setShowDatePicker(false);
-                      if (date) {
-                        setSelectedDate(date);
-                        updateScheduledDateTime(date, selectedTime);
-                      }
-                    }}
-                    minimumDate={new Date()}
-                  />
-                )}
-
+  <DateTimePicker
+    value={selectedDate || new Date()}
+    mode="date"
+    display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+    onChange={(event, date) => {
+      setShowDatePicker(false);
+      if (date) {
+        // Create a new date to avoid timezone issues
+        const newDate = new Date(date);
+        newDate.setHours(selectedTime ? selectedTime.getHours() : 0);
+        newDate.setMinutes(selectedTime ? selectedTime.getMinutes() : 0);
+        setSelectedDate(newDate);
+        updateScheduledDateTime(newDate, selectedTime);
+      }
+    }}
+    minimumDate={new Date()}
+  />
+)}
                 {showTimePicker && (
-                  <DateTimePicker
-                    value={selectedTime || new Date()}
-                    mode="time"
-                    display={Platform.OS === 'ios' ? 'spinner' : 'default'}
-                    onChange={(event, time) => {
-                      setShowTimePicker(false);
-                      if (time) {
-                        setSelectedTime(time);
-                        updateScheduledDateTime(selectedDate, time);
-                      }
-                    }}
-                  />
-                )}
+  <DateTimePicker
+    value={selectedTime || new Date()}
+    mode="time"
+    display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+    onChange={(event, time) => {
+      setShowTimePicker(false);
+      if (time) {
+        // Create a new date with the selected time to avoid timezone issues
+        const newTime = new Date();
+        newTime.setHours(time.getHours());
+        newTime.setMinutes(time.getMinutes());
+        newTime.setSeconds(0);
+        setSelectedTime(newTime);
+        updateScheduledDateTime(selectedDate, newTime);
+      }
+    }}
+  />
+)}
               </View>
             )}
 
