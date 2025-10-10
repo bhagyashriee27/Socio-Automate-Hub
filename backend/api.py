@@ -20,6 +20,23 @@ from email.mime.multipart import MIMEMultipart
 import random
 import time
 
+import json
+from datetime import datetime
+
+
+
+import os
+import uuid
+from flask import request, jsonify
+from werkzeug.utils import secure_filename
+import threading
+from collections import defaultdict
+# Add these global variables for chunk management
+upload_chunks = defaultdict(list)
+upload_status = {}
+
+# done 👌👌👌👌 done wait
+
 # Store OTPs temporarily (in production, use Redis or database)
 otp_storage = {}
 
@@ -245,7 +262,7 @@ def reset_password():
         return jsonify({"error": f"Database error: {str(e)}"}), 500
 
 def send_otp_email(email: str, otp: str, user_name: str):
-    """Send OTP email to user."""
+    """Send OTP email to user from Socio-Automate Hub."""
     try:
         # Email configuration
         smtp_server = "smtp.gmail.com"
@@ -255,9 +272,9 @@ def send_otp_email(email: str, otp: str, user_name: str):
 
         # Create message
         message = MIMEMultipart()
-        message["From"] = sender_email
+        message["From"] = f"Socio-Automate Hub <{sender_email}>"
         message["To"] = email
-        message["Subject"] = "Password Reset OTP"
+        message["Subject"] = "Password Reset OTP - Socio-Automate Hub"
 
         # Email body
         body = f"""
@@ -265,12 +282,12 @@ def send_otp_email(email: str, otp: str, user_name: str):
             <body>
                 <h2>Password Reset Request</h2>
                 <p>Hello {user_name},</p>
-                <p>You have requested to reset your password. Please use the following OTP to verify your identity:</p>
+                <p>You have requested to reset your password for your Socio-Automate Hub account. Please use the following OTP to verify your identity:</p>
                 <h1 style="color: #007AFF; font-size: 32px; text-align: center; letter-spacing: 5px;">{otp}</h1>
                 <p>This OTP is valid for 10 minutes.</p>
-                <p>If you didn't request this reset, please ignore this email.</p>
+                <p>If you didn't request this reset, please ignore this email or contact our support team.</p>
                 <br>
-                <p>Best regards,<br>Your App Team</p>
+                <p>Best regards,<br>Socio-Automate Hub Team</p>
             </body>
         </html>
         """
@@ -341,28 +358,102 @@ def login():
 def get_dashboard():
     if 'user_id' not in session:
         return jsonify({"error": "Unauthorized access"}), 403
-    conn = get_db_connection()
-    cursor = conn.cursor(dictionary=True)
+    
     user_id = session['user_id']
     email_id = session['user_email']
     
-    
-    cursor.execute("SELECT COUNT(*) AS count FROM instagram WHERE user_id = %s AND selected = 'Yes'", (email_id,))
-    instagram_active = cursor.fetchone()['count']
-    cursor.execute("SELECT COUNT(*) AS count FROM telegram WHERE user_id = %s AND selected = 'Yes'", (email_id,))
-    telegram_active = cursor.fetchone()['count']
-    cursor.execute("SELECT COUNT(*) AS count FROM instagram WHERE user_id = %s", (email_id,))
-    instagram_total = cursor.fetchone()['count']
-    cursor.execute("SELECT COUNT(*) AS count FROM telegram WHERE user_id = %s", (email_id,))
-    telegram_total = cursor.fetchone()['count']
-    cursor.close()
-    conn.close()
-    return jsonify({
-        "totalAccounts": instagram_total + telegram_total,
-        "activeSchedules": instagram_active + telegram_active,
-        "instagramAccounts": instagram_total,
-        "telegramAccounts": telegram_total
-    })
+    conn = get_db_connection()
+    if not conn:
+        return jsonify({"error": "Database connection failed"}), 500
+
+    try:
+        cursor = conn.cursor(dictionary=True)
+        
+        # Single query to get all counts for Instagram
+        cursor.execute("""
+            SELECT 
+                COUNT(*) as total,
+                SUM(CASE WHEN selected = 'Yes' THEN 1 ELSE 0 END) as active
+            FROM instagram 
+            WHERE user_id = %s
+        """, (email_id,))
+        instagram_result = cursor.fetchone()
+        
+        # Single query to get all counts for Telegram
+        cursor.execute("""
+            SELECT 
+                COUNT(*) as total,
+                SUM(CASE WHEN selected = 'Yes' THEN 1 ELSE 0 END) as active
+            FROM telegram 
+            WHERE user_id = %s
+        """, (email_id,))
+        telegram_result = cursor.fetchone()
+        
+        # Single query to get all counts for Facebook
+        cursor.execute("""
+            SELECT 
+                COUNT(*) as total,
+                SUM(CASE WHEN selected = 'Yes' THEN 1 ELSE 0 END) as active
+            FROM facebook 
+            WHERE user_id = %s
+        """, (email_id,))
+        facebook_result = cursor.fetchone()
+        
+        # Single query to get all counts for YouTube
+        cursor.execute("""
+            SELECT 
+                COUNT(*) as total,
+                SUM(CASE WHEN selected = 'Yes' THEN 1 ELSE 0 END) as active
+            FROM youtube 
+            WHERE user_id = %s
+        """, (email_id,))
+        youtube_result = cursor.fetchone()
+        
+        # Calculate posts for today (single query per platform)
+        today = datetime.now(TIMEZONE).date()
+        tomorrow = today + timedelta(days=1)
+        
+        posts_today = 0
+        for platform in ['instagram', 'telegram', 'facebook', 'youtube']:
+            cursor.execute(f"""
+                SELECT COUNT(*) as count 
+                FROM {platform} 
+                WHERE user_id = %s 
+                AND next_post_time >= %s 
+                AND next_post_time < %s
+            """, (email_id, today, tomorrow))
+            result = cursor.fetchone()
+            posts_today += result['count'] if result else 0
+        
+        cursor.close()
+        conn.close()
+        
+        instagram_total = instagram_result['total'] if instagram_result else 0
+        instagram_active = instagram_result['active'] if instagram_result else 0
+        telegram_total = telegram_result['total'] if telegram_result else 0
+        telegram_active = telegram_result['active'] if telegram_result else 0
+        facebook_total = facebook_result['total'] if facebook_result else 0
+        facebook_active = facebook_result['active'] if facebook_result else 0
+        youtube_total = youtube_result['total'] if youtube_result else 0
+        youtube_active = youtube_result['active'] if youtube_result else 0
+        
+        total_accounts = instagram_total + telegram_total + facebook_total + youtube_total
+        active_schedules = instagram_active + telegram_active + facebook_active + youtube_active
+        
+        return jsonify({
+            "totalAccounts": total_accounts,
+            "activeSchedules": active_schedules,
+            "postsToday": posts_today,
+            "instagramAccounts": instagram_total,
+            "telegramAccounts": telegram_total,
+            "facebookAccounts": facebook_total,
+            "youtubeAccounts": youtube_total
+        }), 200
+        
+    except mysql.connector.Error as e:
+        if conn:
+            conn.close()
+        return jsonify({"error": f"Database error: {str(e)}"}), 500
 
 @app.route('/user/<int:user_id>/password', methods=['PATCH'])
 def change_password(user_id):
@@ -435,8 +526,8 @@ def signup():
             return jsonify({"error": "Email already exists"}), 400
 
         # Insert user
-        query = "INSERT INTO user (Name, passward, email, expiry) VALUES (%s, %s, %s, %s)"
-        cursor.execute(query, (name, password, email, expiry))
+        query = "INSERT INTO user (Name, passward, email, expiry, phone_number) VALUES (%s, %s, %s, %s, %s)"
+        cursor.execute(query, (name, password, email, expiry, phone_number))
         user_id = cursor.lastrowid
         conn.commit()
         cursor.close()
@@ -738,13 +829,444 @@ def update_telegram(record_id):
         return jsonify({"error": f"Database error: {str(e)}"}), 500
 
 
+@app.route('/upload-media-chunk', methods=['POST'])
+def upload_media_chunk():
+    """Handle chunked file uploads."""
+    try:
+        chunk_file = request.files.get('chunk')
+        account_id = request.form.get('account_id')
+        platform = request.form.get('platform')
+        user_id = request.form.get('user_id')
+        chunk_index = int(request.form.get('chunk_index', 0))
+        total_chunks = int(request.form.get('total_chunks', 1))
+        upload_id = request.form.get('upload_id')
+        original_name = request.form.get('original_name')
+
+        if not all([chunk_file, account_id, platform, user_id, upload_id, original_name]):
+            return jsonify({"error": "Missing required parameters"}), 400
+
+        # Create upload directory if it doesn't exist
+        upload_dir = f"temp_uploads/{upload_id}"
+        os.makedirs(upload_dir, exist_ok=True)
+
+        # Save chunk
+        chunk_filename = f"{upload_dir}/chunk_{chunk_index:04d}"
+        chunk_file.save(chunk_filename)
+
+        # Track chunk progress
+        if upload_id not in upload_chunks:
+            upload_chunks[upload_id] = []
+        upload_chunks[upload_id].append(chunk_index)
+
+        # Update status
+        upload_status[upload_id] = {
+            'uploaded_chunks': len(upload_chunks[upload_id]),
+            'total_chunks': total_chunks,
+            'account_id': account_id,
+            'platform': platform,
+            'user_id': user_id,
+            'original_name': original_name
+        }
+
+        return jsonify({
+            "message": f"Chunk {chunk_index + 1}/{total_chunks} uploaded successfully",
+            "chunk_index": chunk_index,
+            "uploaded_chunks": len(upload_chunks[upload_id]),
+            "total_chunks": total_chunks,
+            "success": True
+        }), 200
+
+    except Exception as e:
+        return jsonify({"error": f"Chunk upload failed: {str(e)}", "success": False}), 500
+# Find the existing finalize-upload endpoint and UPDATE it:
 
 
+
+@app.route('/finalize-upload', methods=['POST'])
+def finalize_upload():
+    """Combine chunks and upload to Google Drive with scheduling support."""
+    try:
+        upload_id = request.form.get('upload_id')
+        account_id = request.form.get('account_id')
+        platform = request.form.get('platform')
+        user_id = request.form.get('user_id')
+        original_name = request.form.get('original_name')
+        total_chunks = int(request.form.get('total_chunks', 1))
+        
+        # Get scheduling data from form
+        schedule_type = request.form.get('schedule_type', 'range')
+        scheduled_datetime = request.form.get('scheduled_datetime')
+
+        if not all([upload_id, account_id, platform, user_id, original_name]):
+            return jsonify({"error": "Missing required parameters"}), 400
+
+        # Verify all chunks are uploaded
+        uploaded_chunks = upload_chunks.get(upload_id, [])
+        if len(uploaded_chunks) != total_chunks:
+            return jsonify({
+                "error": f"Incomplete upload: {len(uploaded_chunks)}/{total_chunks} chunks received"
+            }), 400
+
+        # Combine chunks in a background thread with scheduling data
+        thread = threading.Thread(
+            target=combine_and_upload_chunks,
+            args=(upload_id, account_id, platform, user_id, original_name, total_chunks, schedule_type, scheduled_datetime)
+        )
+        thread.daemon = True
+        thread.start()
+
+        return jsonify({
+            "message": "Upload finalization started",
+            "upload_id": upload_id,
+            "status": "processing",
+            "success": True
+        }), 200
+
+    except Exception as e:
+        return jsonify({"error": f"Finalization failed: {str(e)}", "success": False}), 500
+
+
+
+
+
+# Add this after your existing endpoints, before the if __name__ block
+
+# Add this new endpoint for updating custom schedule data
+@app.route('/<platform>/<int:record_id>/custom-schedule', methods=['PATCH'])
+def update_custom_schedule(platform, record_id):
+    """Update custom schedule data for a platform account."""
+    if platform not in ['instagram', 'telegram', 'facebook', 'youtube']:
+        return jsonify({"error": "Invalid platform"}), 400
+
+    data = request.get_json()
+    custom_schedule_data = data.get('custom_schedule_data')
+
+    # Validate custom_schedule_data format
+    if custom_schedule_data is not None:
+        try:
+            # Validate it's a list
+            if not isinstance(custom_schedule_data, list):
+                return jsonify({"error": "custom_schedule_data must be a list"}), 400
+            
+            # Validate each item in the list
+            for item in custom_schedule_data:
+                if not isinstance(item, dict):
+                    return jsonify({"error": "Each schedule item must be an object"}), 400
+                
+                required_fields = ['media_name', 'scheduled_datetime', 'file_id']
+                for field in required_fields:
+                    if field not in item:
+                        return jsonify({"error": f"Missing required field: {field}"}), 400
+                
+                # Validate datetime format
+                try:
+                    datetime.strptime(item['scheduled_datetime'], '%Y-%m-%d %H:%M:%S')
+                except ValueError:
+                    return jsonify({"error": "Invalid datetime format. Use YYYY-MM-DD HH:MM:SS"}), 400
+
+            # Convert to JSON string for storage
+            custom_schedule_json = json.dumps(custom_schedule_data)
+        except Exception as e:
+            return jsonify({"error": f"Invalid custom_schedule_data format: {str(e)}"}), 400
+    else:
+        custom_schedule_json = None
+
+    conn = get_db_connection()
+    if not conn:
+        return jsonify({"error": "Database connection failed"}), 500
+
+    try:
+        cursor = conn.cursor()
+        
+        # Verify record exists
+        cursor.execute(f"SELECT id FROM {platform} WHERE id = %s", (record_id,))
+        if not cursor.fetchone():
+            cursor.close()
+            conn.close()
+            return jsonify({"error": f"{platform.capitalize()} record not found"}), 404
+
+        # Update custom_schedule_data
+        query = f"UPDATE {platform} SET custom_schedule_data = %s WHERE id = %s"
+        cursor.execute(query, (custom_schedule_json, record_id))
+        conn.commit()
+        cursor.close()
+        conn.close()
+
+        return jsonify({"message": "Custom schedule data updated successfully"}), 200
+
+    except mysql.connector.Error as e:
+        conn.close()
+        return jsonify({"error": f"Database error: {str(e)}"}), 500
+
+# Add this new endpoint for getting custom schedule data
+@app.route('/<platform>/<int:record_id>/custom-schedule', methods=['GET'])
+def get_custom_schedule(platform, record_id):
+    """Get custom schedule data for a platform account."""
+    if platform not in ['instagram', 'telegram', 'facebook', 'youtube']:
+        return jsonify({"error": "Invalid platform"}), 400
+
+    conn = get_db_connection()
+    if not conn:
+        return jsonify({"error": "Database connection failed"}), 500
+
+    try:
+        cursor = conn.cursor(dictionary=True)
+        
+        # Get custom_schedule_data
+        cursor.execute(f"SELECT custom_schedule_data FROM {platform} WHERE id = %s", (record_id,))
+        result = cursor.fetchone()
+        
+        if not result:
+            cursor.close()
+            conn.close()
+            return jsonify({"error": f"{platform.capitalize()} record not found"}), 404
+
+        custom_schedule_data = None
+        if result['custom_schedule_data']:
+            try:
+                custom_schedule_data = json.loads(result['custom_schedule_data'])
+            except json.JSONDecodeError:
+                custom_schedule_data = None
+
+        cursor.close()
+        conn.close()
+
+        return jsonify({
+            "custom_schedule_data": custom_schedule_data
+        }), 200
+
+    except mysql.connector.Error as e:
+        conn.close()
+        return jsonify({"error": f"Database error: {str(e)}"}), 500
+
+
+# Add this function after the helper functions section, before the API endpoints
+def process_upload_with_scheduling(platform, account_id, media_data):
+    """Process upload and update custom schedule data for both range and datetime scheduling."""
+    try:
+        schedule_type = media_data.get('schedule_type', 'range')
+        scheduled_datetime = media_data.get('scheduled_datetime')
+        
+        # Always process scheduling data, regardless of schedule type
+        conn = get_db_connection()
+        if not conn:
+            return
+            
+        try:
+            cursor = conn.cursor(dictionary=True)
+            cursor.execute(f"SELECT custom_schedule_data FROM {platform} WHERE id = %s", (account_id,))
+            result = cursor.fetchone()
+            
+            current_schedule_data = []
+            if result and result['custom_schedule_data']:
+                try:
+                    current_schedule_data = json.loads(result['custom_schedule_data'])
+                    if not isinstance(current_schedule_data, list):
+                        current_schedule_data = []
+                except json.JSONDecodeError:
+                    current_schedule_data = []
+            
+            # Check if this file was already added (prevent duplicates from retries)
+            existing_entry = None
+            for item in current_schedule_data:
+                if (item.get('media_name') == media_data.get('original_name') and 
+                    item.get('scheduled_datetime') == scheduled_datetime and
+                    item.get('schedule_type') == schedule_type):
+                    existing_entry = item
+                    break
+            
+            if existing_entry:
+                # Update existing entry with new file_id if needed
+                existing_entry['file_id'] = media_data.get('file_id', existing_entry.get('file_id', ''))
+                existing_entry['upload_time'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                print(f"✅ Updated existing schedule entry for {media_data.get('original_name')}")
+            else:
+                # Add new schedule item
+                new_schedule_item = {
+                    'media_name': media_data.get('original_name', 'unknown'),
+                    'scheduled_datetime': scheduled_datetime if schedule_type == 'datetime' else None,
+                    'file_id': media_data.get('file_id', ''),
+                    'status': 'pending',
+                    'upload_time': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                    'schedule_type': schedule_type
+                }
+                
+                current_schedule_data.append(new_schedule_item)
+                print(f"✅ Added {schedule_type} schedule for {media_data.get('original_name')}")
+            
+            # Update database
+            updated_schedule_json = json.dumps(current_schedule_data)
+            cursor.execute(f"UPDATE {platform} SET custom_schedule_data = %s WHERE id = %s", 
+                         (updated_schedule_json, account_id))
+            conn.commit()
+            cursor.close()
+            
+        except Exception as e:
+            print(f"Error updating custom schedule: {str(e)}")
+        finally:
+            conn.close()
+                
+    except Exception as e:
+        print(f"Error in process_upload_with_scheduling: {str(e)}")
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# Find the combine_and_upload_chunks function and UPDATE it:
+def combine_and_upload_chunks(upload_id, account_id, platform, user_id, original_name, total_chunks, schedule_type='range', scheduled_datetime=None):
+    """Combine chunks and upload to Google Drive in background with scheduling support."""
+    try:
+        upload_dir = f"temp_uploads/{upload_id}"
+        combined_path = f"temp_uploads/{upload_id}_combined_{original_name}"
+
+        # Combine chunks
+        with open(combined_path, 'wb') as output_file:
+            for chunk_index in range(total_chunks):
+                chunk_path = f"{upload_dir}/chunk_{chunk_index:04d}"
+                with open(chunk_path, 'rb') as chunk_file:
+                    output_file.write(chunk_file.read())
+
+        # Upload to Google Drive using existing logic
+        conn = get_db_connection()
+        if not conn:
+            upload_status[upload_id]['status'] = 'failed'
+            upload_status[upload_id]['error'] = 'Database connection failed'
+            return
+
+        try:
+            cursor = conn.cursor(dictionary=True)
+            
+            # Build query based on platform
+            if platform == 'youtube':
+                cursor.execute(f"SELECT google_drive_link, token_sesson FROM {platform} WHERE id = %s AND user_id = %s", (account_id, user_id))
+            else:
+                cursor.execute(f"SELECT google_drive_link, token_drive FROM {platform} WHERE id = %s AND user_id = %s", (account_id, user_id))
+                
+            account = cursor.fetchone()
+            cursor.close()
+
+            if not account:
+                upload_status[upload_id]['status'] = 'failed'
+                upload_status[upload_id]['error'] = 'Account not found'
+                return
+
+            # Extract folder ID and upload
+            folder_id_match = re.search(r'folders/([a-zA-Z0-9-_]+)', account.get('google_drive_link', ''))
+            if folder_id_match:
+                folder_id = folder_id_match.group(1)
+                
+                # Handle token
+                if platform == 'youtube':
+                    token_data = account.get('token_sesson', '{}')
+                else:
+                    token_data = account.get('token_drive', '{}')
+                
+                if token_data and token_data != "{}":
+                    token_drive = json.loads(token_data)
+                    creds = Credentials.from_authorized_user_info(token_drive, SCOPES)
+                    if creds and creds.expired and creds.refresh_token:
+                        creds.refresh(Request())
+                    
+                    service = build('drive', 'v3', credentials=creds)
+                    
+                    file_metadata = {
+                        'name': original_name,
+                        'parents': [folder_id]
+                    }
+                    
+                    # Determine MIME type
+                    mime_type = 'image/jpeg'
+                    if original_name.lower().endswith(('.mp4', '.mov', '.avi')):
+                        mime_type = 'video/mp4'
+                    elif original_name.lower().endswith('.png'):
+                        mime_type = 'image/png'
+                    elif original_name.lower().endswith('.gif'):
+                        mime_type = 'image/gif'
+
+                    media = MediaFileUpload(combined_path, mimetype=mime_type)
+                    
+                    uploaded_file = service.files().create(
+                        body=file_metadata, 
+                        media_body=media, 
+                        fields='id,name,webViewLink'
+                    ).execute()
+
+                    media.stream().close() if hasattr(media, 'stream') else None
+
+                    # PROCESS SCHEDULING DATA AFTER SUCCESSFUL UPLOAD
+                    schedule_data = {
+                        'schedule_type': schedule_type,
+                        'scheduled_datetime': scheduled_datetime,
+                        'original_name': original_name,
+                        'file_id': uploaded_file['id']
+                    }
+                    process_upload_with_scheduling(platform, account_id, schedule_data)
+
+                    upload_status[upload_id]['status'] = 'completed'
+                    upload_status[upload_id]['file_id'] = uploaded_file['id']
+                    upload_status[upload_id]['drive_link'] = uploaded_file.get('webViewLink', '')
+                else:
+                    upload_status[upload_id]['status'] = 'completed'
+                    upload_status[upload_id]['message'] = 'File processed (no Drive token)'
+            else:
+                upload_status[upload_id]['status'] = 'completed'
+                upload_status[upload_id]['message'] = 'File processed (no Drive configured)'
+
+        except Exception as e:
+            upload_status[upload_id]['status'] = 'failed'
+            upload_status[upload_id]['error'] = str(e)
+        finally:
+            conn.close()
+
+        # Cleanup
+        try:
+            import shutil
+            shutil.rmtree(upload_dir, ignore_errors=True)
+            if os.path.exists(combined_path):
+                os.remove(combined_path)
+        except:
+            pass
+
+    except Exception as e:
+        upload_status[upload_id]['status'] = 'failed'
+        upload_status[upload_id]['error'] = str(e)
+
+@app.route('/upload-status/<upload_id>', methods=['GET'])
+def get_upload_status(upload_id):
+    """Check status of chunked upload."""
+    status = upload_status.get(upload_id, {})
+    return jsonify(status), 200
+
+
+
+
+
+
+
+
+# Find the existing upload-media endpoint and UPDATE it:
 
 @app.route('/upload-media', methods=['POST'])
 def upload_media():
-    if 'file' not in request.files:
+    """Handle both single file and chunked uploads with scheduling support."""
+    if 'file' not in request.files and 'chunk' not in request.files:
         return jsonify({"error": "No file provided"}), 400
+
+    # If it's a chunk, redirect to chunk upload handler
+    if 'chunk' in request.files:
+        return upload_media_chunk()
 
     file = request.files['file']
     account_id = request.form.get('account_id')
@@ -763,16 +1285,14 @@ def upload_media():
     if not conn:
         return jsonify({"error": "Database connection failed"}), 500
 
-    temp_path = None  # Initialize temp_path
+    temp_path = None
     try:
         cursor = conn.cursor(dictionary=True)
         
-        # Build query based on platform - DIFFERENT FOR YOUTUBE
+        # Query tokens based on platform
         if platform == 'youtube':
-            # For YouTube, use token_sesson instead of token_drive
             cursor.execute(f"SELECT google_drive_link, token_sesson FROM {table} WHERE id = %s AND user_id = %s", (account_id, user_id))
         else:
-            # For Instagram and Telegram, use token_drive
             cursor.execute(f"SELECT google_drive_link, token_drive FROM {table} WHERE id = %s AND user_id = %s", (account_id, user_id))
             
         account = cursor.fetchone()
@@ -782,28 +1302,22 @@ def upload_media():
             conn.close()
             return jsonify({"error": "Account not found or does not belong to user"}), 404
 
-        # Check if Google Drive is configured
+        # Check Google Drive link
         if not account.get('google_drive_link'):
             conn.close()
-            return jsonify({"message": "File queued for upload (no Drive configured)"}), 200
+            return jsonify({"message": "File queued for upload (no Drive configured)", "file_id": "no_drive"}), 200
 
-        # Extract folder ID from google_drive_link
         folder_id_match = re.search(r'folders/([a-zA-Z0-9-_]+)', account['google_drive_link'])
         if not folder_id_match:
             conn.close()
             return jsonify({"error": "Invalid Google Drive link format"}), 400
         folder_id = folder_id_match.group(1)
 
-        # Handle token - DIFFERENT FOR YOUTUBE
-        if platform == 'youtube':
-            token_data = account.get('token_sesson', '{}')
-        else:
-            token_data = account.get('token_drive', '{}')
-        
-        # If token is empty JSON, return success without uploading to Drive
+        # Handle Drive token
+        token_data = account.get('token_sesson' if platform == 'youtube' else 'token_drive', '{}')
         if not token_data or token_data == "{}":
             conn.close()
-            return jsonify({"message": "File queued for upload (no Drive token)"}), 200
+            return jsonify({"message": "File queued for upload (no Drive token)", "file_id": "no_token"}), 200
 
         try:
             token_drive = json.loads(token_data)
@@ -814,45 +1328,37 @@ def upload_media():
             conn.close()
             return jsonify({"error": f"Failed to load Google Drive credentials: {str(e)}"}), 500
 
-        # Build Drive service
+        # Build Google Drive service
         service = build('drive', 'v3', credentials=creds)
 
-        # Save file temporarily with unique name to avoid conflicts
+        # Save temp file
         temp_dir = 'temp_uploads'
         os.makedirs(temp_dir, exist_ok=True)
         file_extension = os.path.splitext(file.filename)[1] if file.filename else '.jpg'
         unique_filename = f"{uuid.uuid4()}{file_extension}"
         temp_path = os.path.join(temp_dir, unique_filename)
-        
         file.save(temp_path)
 
-        # Upload to Drive
-        file_metadata = {
-            'name': file.filename or unique_filename,
-            'parents': [folder_id]
-        }
-        
-        # Determine MIME type
-        mime_type = 'image/jpeg'  # default
-        if file.filename and file.filename.lower().endswith(('.mp4', '.mov', '.avi')):
-            mime_type = 'video/mp4'
-        elif file.filename and file.filename.lower().endswith(('.png',)):
-            mime_type = 'image/png'
-        elif file.filename and file.filename.lower().endswith(('.gif',)):
-            mime_type = 'image/gif'
+        # Detect MIME type
+        mime_type = 'image/jpeg'
+        if file.filename:
+            lower = file.filename.lower()
+            if lower.endswith(('.mp4', '.mov', '.avi')):
+                mime_type = 'video/mp4'
+            elif lower.endswith('.png'):
+                mime_type = 'image/png'
+            elif lower.endswith('.gif'):
+                mime_type = 'image/gif'
 
+        # Upload to Google Drive
+        file_metadata = {'name': file.filename or unique_filename, 'parents': [folder_id]}
         media = MediaFileUpload(temp_path, mimetype=mime_type)
-        
         uploaded_file = service.files().create(
-            body=file_metadata, 
-            media_body=media, 
-            fields='id,name,webViewLink'
+            body=file_metadata, media_body=media, fields='id,name,webViewLink'
         ).execute()
 
-        # FIX: Close the media object before removing the file
+        # Close and clean temp file
         media.stream().close() if hasattr(media, 'stream') else None
-        
-        # Clean up temp file with retry logic
         max_retries = 3
         for attempt in range(max_retries):
             try:
@@ -861,37 +1367,48 @@ def upload_media():
                 break
             except PermissionError:
                 if attempt < max_retries - 1:
-                    time.sleep(0.1)  # Wait 100ms before retry
+                    time.sleep(0.1)
                 else:
                     print(f"Warning: Could not delete temp file {temp_path}")
 
-        conn.close()
+        # PROCESS SCHEDULING DATA AFTER SUCCESSFUL UPLOAD
+        schedule_data = {
+            'schedule_type': request.form.get('schedule_type', 'range'),
+            'scheduled_datetime': request.form.get('scheduled_datetime'),
+            'original_name': file.filename or unique_filename,
+            'file_id': uploaded_file['id']
+        }
+        process_upload_with_scheduling(platform, account_id, schedule_data)
 
+        conn.close()
+        
+        # Return consistent success response
         return jsonify({
-            "message": "Upload successful", 
+            "message": "Upload successful",
             "file_id": uploaded_file['id'],
             "file_name": uploaded_file['name'],
-            "drive_link": uploaded_file.get('webViewLink', '')
+            "drive_link": uploaded_file.get('webViewLink', ''),
+            "success": True  # Add explicit success flag
         }), 200
-        
+
     except HttpError as e:
-        # Clean up temp file on error
         if temp_path and os.path.exists(temp_path):
             try:
                 os.remove(temp_path)
             except:
                 pass
         conn.close()
-        return jsonify({"error": f"Google Drive error: {str(e)}"}), 500
+        return jsonify({"error": f"Google Drive error: {str(e)}", "success": False}), 500
+
     except Exception as e:
-        # Clean up temp file on error
         if temp_path and os.path.exists(temp_path):
             try:
                 os.remove(temp_path)
             except:
                 pass
         conn.close()
-        return jsonify({"error": f"Upload failed: {str(e)}"}), 500
+        return jsonify({"error": f"Upload failed: {str(e)}", "success": False}), 500
+
 
 @app.route('/instagram/<int:record_id>', methods=['DELETE'])
 def delete_instagram(record_id):

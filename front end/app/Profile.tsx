@@ -6,11 +6,13 @@ import {
   ScrollView,
   TouchableOpacity,
   Alert,
-  Image,
   Animated,
   Dimensions,
   SafeAreaView,
+  ActivityIndicator,
+  Image, // Ensure Image is imported from react-native
 } from 'react-native';
+import Ionicons from 'react-native-vector-icons/Ionicons';
 import ApiService from '../services/api';
 import StorageService from '../utils/storage';
 import { User, InstagramAccount, TelegramAccount } from '../types';
@@ -26,6 +28,8 @@ const Profile: React.FC<{ navigation: any }> = ({ navigation }) => {
   const [fadeAnim] = useState(new Animated.Value(0));
   const [slideAnim] = useState(new Animated.Value(50));
   const [logoutScaleAnim] = useState(new Animated.Value(1));
+  const [logoutPulseAnim] = useState(new Animated.Value(1));
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
   const [profilePicSeed] = useState(Math.random().toString(36).substring(7)); // Random seed for avatar
 
   useEffect(() => {
@@ -64,39 +68,56 @@ const Profile: React.FC<{ navigation: any }> = ({ navigation }) => {
   };
 
   const handleLogout = async () => {
-    // Animate logout button on press
-    Animated.sequence([
-      Animated.timing(logoutScaleAnim, {
-        toValue: 0.95,
-        duration: 100,
-        useNativeDriver: true,
-      }),
-      Animated.spring(logoutScaleAnim, {
-        toValue: 1,
-        tension: 10,
-        friction: 8,
-        useNativeDriver: true,
-      }),
+    // Animate logout button with scale and pulse
+    Animated.parallel([
+      Animated.sequence([
+        Animated.timing(logoutScaleAnim, {
+          toValue: 0.95,
+          duration: 100,
+          useNativeDriver: true,
+        }),
+        Animated.spring(logoutScaleAnim, {
+          toValue: 1,
+          tension: 10,
+          friction: 8,
+          useNativeDriver: true,
+        }),
+      ]),
+      Animated.sequence([
+        Animated.timing(logoutPulseAnim, {
+          toValue: 1.1,
+          duration: 150,
+          useNativeDriver: true,
+        }),
+        Animated.timing(logoutPulseAnim, {
+          toValue: 1,
+          duration: 150,
+          useNativeDriver: true,
+        }),
+      ]),
     ]).start();
+
+    setIsLoggingOut(true);
 
     Alert.alert(
       'Confirm Logout',
       'Are you sure you want to log out?',
       [
-        { text: 'Cancel', style: 'cancel' },
+        { text: 'Cancel', style: 'cancel', onPress: () => setIsLoggingOut(false) },
         {
           text: 'Logout',
           style: 'destructive',
           onPress: async () => {
             try {
-              await StorageService.removeUserData(); // Updated to removeUserData
-              await StorageService.removeAuthToken(); // Clear auth token as well
+              await StorageService.removeUserData();
+              await StorageService.removeAuthToken();
               // Reset navigation to Login screen
               navigation.reset({
                 index: 0,
                 routes: [{ name: 'Login' }],
               });
             } catch (error) {
+              setIsLoggingOut(false);
               Alert.alert('Error', 'Failed to log out. Try again.');
               console.error('Logout error:', error); // Debug log
             }
@@ -112,8 +133,45 @@ const Profile: React.FC<{ navigation: any }> = ({ navigation }) => {
 
   const now = new Date(); // Dynamic current date
 
-  // Generate avatar URL using DiceBear
-  const getAvatarUrl = (seed: string) => `https://api.dicebear.com/7.x/avataaars/svg?seed=${seed}`;
+  // User Badge Component
+  const UserBadge = () => {
+    const getInitials = (name: string) => {
+      const nameParts = name?.trim().split(' ') || ['U'];
+      return nameParts.length > 1
+        ? `${nameParts[0][0]}${nameParts[nameParts.length - 1][0]}`
+        : nameParts[0][0];
+    };
+
+    const getBadgeColor = (name: string) => {
+      const colors = ['#007AFF', '#34C759', '#FF9500', '#FF3B30', '#5856D6'];
+      const hash = name.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
+      return colors[hash % colors.length];
+    };
+
+    return (
+      <Animated.View
+        style={[
+          styles.badgeContainer,
+          {
+            opacity: fadeAnim,
+            transform: [
+              {
+                scale: fadeAnim.interpolate({
+                  inputRange: [0, 1],
+                  outputRange: [0.8, 1],
+                }),
+              },
+            ],
+            backgroundColor: user?.Name ? getBadgeColor(user.Name) : '#007AFF',
+          },
+        ]}
+      >
+        <Text style={styles.badgeText}>
+          {user?.Name ? getInitials(user.Name) : 'U'}
+        </Text>
+      </Animated.View>
+    );
+  };
 
   // Dynamic account cards with random avatars
   const AccountCard = ({ account, platform }: { account: any; platform: string }) => {
@@ -152,15 +210,25 @@ const Profile: React.FC<{ navigation: any }> = ({ navigation }) => {
         <View style={styles.accountCardRow}>
           <Image
             style={styles.accountAvatar}
-            source={{ uri: getAvatarUrl(accountSeed) }}
+            source={{ uri: `https://api.dicebear.com/7.x/avataaars/svg?seed=${accountSeed}` }}
           />
           <View style={styles.accountInfo}>
-            <Text style={styles.accountPlatform}>{platform}</Text>
+            <Text style={styles.accountPlatform}>
+              <Ionicons
+                name={platform === 'Instagram' ? 'logo-instagram' : 'paper-plane'}
+                size={12}
+                color="#1C2526"
+              /> {platform}
+            </Text>
             <Text style={styles.accountName}>
               {platform === 'Instagram' ? account.username : account.channel_name}
             </Text>
             <Text style={[styles.accountStatus, { color: isInactive ? '#FF3B30' : '#34C759' }]}>
-              {isInactive ? 'Inactive' : 'Active'}
+              <Ionicons
+                name={isInactive ? 'close-circle' : 'checkmark-circle'}
+                size={12}
+                color={isInactive ? '#FF3B30' : '#34C759'}
+              /> {isInactive ? 'Inactive' : 'Active'}
             </Text>
           </View>
         </View>
@@ -177,7 +245,7 @@ const Profile: React.FC<{ navigation: any }> = ({ navigation }) => {
       activities.push({
         text: `Posted on Instagram (${account.username})`,
         time: `${index + 1}h ago`,
-        icon: '📸'
+        icon: 'logo-instagram',
       });
     });
 
@@ -187,7 +255,7 @@ const Profile: React.FC<{ navigation: any }> = ({ navigation }) => {
       activities.push({
         text: `Scheduled post on Telegram (${account.channel_name})`,
         time: `${igCount + index + 1}h ago`,
-        icon: '📢'
+        icon: 'paper-plane',
       });
     });
 
@@ -196,13 +264,15 @@ const Profile: React.FC<{ navigation: any }> = ({ navigation }) => {
       activities.push({
         text: 'Uploaded media to library',
         time: '2h ago',
-        icon: '📤'
+        icon: 'cloud-upload',
       });
     }
 
     return (
       <View style={styles.activitySection}>
-        <Text style={styles.sectionTitle}>Recent Activity</Text>
+        <Text style={styles.sectionTitle}>
+          <Ionicons name="time" size={20} color="#1C2526" /> Recent Activity
+        </Text>
         <View style={styles.activityList}>
           {activities.slice(0, 5).map((activity, index) => (
             <Animated.View 
@@ -218,7 +288,7 @@ const Profile: React.FC<{ navigation: any }> = ({ navigation }) => {
                 }
               ]}
             >
-              <Text style={styles.activityIcon}>{activity.icon}</Text>
+              <Ionicons name={activity.icon} size={16} color="#1C2526" style={styles.activityIcon} />
               <View style={styles.activityContent}>
                 <Text style={styles.activityText}>{activity.text}</Text>
                 <Text style={styles.activityTime}>{activity.time}</Text>
@@ -256,21 +326,7 @@ const Profile: React.FC<{ navigation: any }> = ({ navigation }) => {
               }],
             }
           ]}>
-            <Animated.Image
-              style={[
-                styles.avatar,
-                {
-                  opacity: fadeAnim,
-                  transform: [{
-                    scale: fadeAnim.interpolate({
-                      inputRange: [0, 1],
-                      outputRange: [0.8, 1],
-                    }),
-                  }],
-                }
-              ]}
-              source={{ uri: getAvatarUrl(profilePicSeed) }}
-            />
+            <UserBadge />
             <Animated.Text style={[
               styles.name,
               {
@@ -278,7 +334,7 @@ const Profile: React.FC<{ navigation: any }> = ({ navigation }) => {
                 transform: [{ translateY: slideAnim }],
               }
             ]}>
-              {user?.Name || 'User'}
+              <Ionicons name="person" size={28} color="#1C2526" /> {user?.Name || 'User'}
             </Animated.Text>
             <Animated.Text style={[
               styles.email,
@@ -287,7 +343,7 @@ const Profile: React.FC<{ navigation: any }> = ({ navigation }) => {
                 transform: [{ translateY: slideAnim }],
               }
             ]}>
-              {user?.email || 'email@example.com'}
+              <Ionicons name="mail" size={18} color="#6B7280" /> {user?.email || 'email@example.com'}
             </Animated.Text>
           </Animated.View>
 
@@ -299,7 +355,7 @@ const Profile: React.FC<{ navigation: any }> = ({ navigation }) => {
                 opacity: fadeAnim,
               }
             ]}>
-              Linked Accounts
+              <Ionicons name="link" size={20} color="#1C2526" /> Linked Accounts
             </Animated.Text>
             {[...instagramAccounts, ...telegramAccounts].length === 0 ? (
               <Animated.Text style={[
@@ -308,7 +364,7 @@ const Profile: React.FC<{ navigation: any }> = ({ navigation }) => {
                   opacity: fadeAnim,
                 }
               ]}>
-                No accounts linked yet
+                <Ionicons name="alert-circle" size={16} color="#6B7280" /> No accounts linked yet
               </Animated.Text>
             ) : (
               <Animated.View style={[
@@ -338,10 +394,12 @@ const Profile: React.FC<{ navigation: any }> = ({ navigation }) => {
                 opacity: fadeAnim,
               }
             ]}>
-              Settings
+              <Ionicons name="settings" size={20} color="#1C2526" /> Settings
             </Animated.Text>
             <View style={styles.settingItem}>
-              <Text style={styles.settingText}>Account Stats</Text>
+              <Text style={styles.settingText}>
+                <Ionicons name="stats-chart" size={18} color="#1C2526" /> Account Stats
+              </Text>
               <Text style={styles.statValue}>
                 {instagramAccounts.length + telegramAccounts.length} Accounts
               </Text>
@@ -351,33 +409,46 @@ const Profile: React.FC<{ navigation: any }> = ({ navigation }) => {
                 style={styles.passwordLinkText}
                 onPress={handleForgotPassword}
               >
-                Forgot your password? Reset it here.
+                <Ionicons name="lock-closed" size={16} color="#007AFF" /> Forgot your password? Reset it here.
               </Text>
             </View>
           </View>
 
-          {/* Logout Button */}
+          {/* Dynamic Logout Button */}
           <AnimatedTouchableOpacity 
             style={[
               styles.logoutButton,
               {
                 opacity: fadeAnim,
-                transform: [{
-                  scale: logoutScaleAnim,
-                }],
+                transform: [
+                  { scale: logoutScaleAnim },
+                  { scale: logoutPulseAnim },
+                ],
+                backgroundColor: isLoggingOut ? '#ccc' : '#FF3B30',
               }
             ]} 
             onPress={handleLogout}
             activeOpacity={0.7}
+            disabled={isLoggingOut}
           >
-            <Animated.Text style={[
-              styles.logoutText,
+            <Animated.View style={[
+              styles.logoutButtonContent,
               {
                 opacity: fadeAnim,
               }
             ]}>
-              Logout
-            </Animated.Text>
+              {isLoggingOut ? (
+                <>
+                  <ActivityIndicator size="small" color="#6B7280" />
+                  <Text style={styles.logoutText}>Logging Out...</Text>
+                </>
+              ) : (
+                <>
+                  <Ionicons name="log-out" size={18} color="#fff" />
+                  <Text style={styles.logoutText}>Logout</Text>
+                </>
+              )}
+            </Animated.View>
           </AnimatedTouchableOpacity>
         </ScrollView>
       </Animated.View>
@@ -411,13 +482,21 @@ const styles = StyleSheet.create({
     shadowRadius: 4,
     elevation: 3,
   },
-  avatar: {
+  badgeContainer: {
     width: 120,
     height: 120,
     borderRadius: 60,
     marginBottom: 15,
     borderWidth: 2,
     borderColor: '#007AFF',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  badgeText: {
+    fontSize: 48,
+    fontWeight: 'bold',
+    color: '#fff',
+    textTransform: 'uppercase',
   },
   name: {
     fontSize: 28,
@@ -517,7 +596,6 @@ const styles = StyleSheet.create({
     borderBottomColor: '#eee',
   },
   activityIcon: {
-    fontSize: 16,
     marginRight: 12,
   },
   activityContent: {
@@ -562,7 +640,6 @@ const styles = StyleSheet.create({
   },
   logoutButton: {
     paddingVertical: 15,
-    backgroundColor: '#FF3B30',
     borderRadius: 8,
     margin: 20,
     alignItems: 'center',
@@ -571,6 +648,11 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.2,
     shadowRadius: 4,
     elevation: 5,
+  },
+  logoutButtonContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
   },
   logoutText: {
     color: '#fff',

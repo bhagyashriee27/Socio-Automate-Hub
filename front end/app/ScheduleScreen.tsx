@@ -54,7 +54,7 @@ const ScheduleScreen: React.FC = () => {
       Alert.alert('Error', 'Failed to load user data');
     }
   };
-
+  
   const loadScheduleData = async (userId: number) => {
     try {
       setLoading(true);
@@ -372,12 +372,12 @@ const ScheduleScreen: React.FC = () => {
               <Text style={styles.statusText}>{status.statusText}</Text>
             </View>
           </View>
-          <Switch
+          {/* <Switch
             value={account.selected === 'Yes'}
             onValueChange={() => toggleAccountStatus(account, platform)}
             trackColor={{ false: '#6B7280', true: '#1C2526' }}
             thumbColor={account.selected === 'Yes' ? '#1C2526' : '#6B7280'}
-          />
+          /> */}
         </View>
 
         <View style={styles.accountDetails}>
@@ -492,8 +492,21 @@ const ScheduleScreen: React.FC = () => {
             </View>
           </View>
         </View>
-
-        <View style={styles.quickActions}>
+        <View style={styles.helpSection}>
+          <Text style={styles.helpTitle}>
+            <Ionicons name="bulb" size={16} color="#007AFF" /> Scheduling Tips
+          </Text>
+          <View style={styles.tipItem}>
+            <Text style={styles.tipText}>• Accounts will only post during their scheduled time ranges</Text>
+          </View>
+          <View style={styles.tipItem}>
+            <Text style={styles.tipText}>• Make sure Google Drive links are properly configured</Text>
+          </View>
+          <View style={styles.tipItem}>
+            <Text style={styles.tipText}>• Monitor post counts to avoid running out of scheduled posts</Text>
+          </View>
+        </View>
+        {/* <View style={styles.quickActions}>
           <Text style={styles.sectionTitle}>Quick Actions</Text>
           <View style={styles.actionButtons}>
             <TouchableOpacity style={styles.quickActionButton}>
@@ -509,7 +522,7 @@ const ScheduleScreen: React.FC = () => {
               <Text style={styles.quickActionText}> Pause All</Text>
             </TouchableOpacity>
           </View>
-        </View>
+        </View> */}
 
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
@@ -555,7 +568,7 @@ const ScheduleScreen: React.FC = () => {
           )}
         </View>
 
-        <View style={styles.helpSection}>
+        {/* <View style={styles.helpSection}>
           <Text style={styles.helpTitle}>
             <Ionicons name="bulb" size={16} color="#007AFF" /> Scheduling Tips
           </Text>
@@ -568,7 +581,7 @@ const ScheduleScreen: React.FC = () => {
           <View style={styles.tipItem}>
             <Text style={styles.tipText}>• Monitor post counts to avoid running out of scheduled posts</Text>
           </View>
-        </View>
+        </View> */}
       </ScrollView>
 
       <Modal

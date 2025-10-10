@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -13,6 +13,7 @@ import {
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import * as FileSystem from 'expo-file-system/legacy';
+import DateTimePicker from '@react-native-community/datetimepicker';
 import ApiService from '../services/api';
 import StorageService from '../utils/storage';
 import { InstagramAccount, TelegramAccount, FacebookAccount, YouTubeAccount } from '../types';
@@ -27,14 +28,16 @@ interface MediaFile {
   progress?: number;
   selected?: boolean;
   chunkProgress?: { uploaded: number; total: number };
+  scheduleType?: 'range' | 'datetime';
+  scheduledDatetime?: string;
 }
 
 interface ChunkProgress {
   [key: string]: { uploaded: number; total: number };
 }
 
-const CHUNK_SIZE = 2 * 1024 * 1024; // 2MB chunks
-const MAX_RETRIES = 3;
+const CHUNK_SIZE = 2 * 1024 * 1024;
+const MAX_RETRIES = 10;
 
 const UploadScreen: React.FC = () => {
   const [platform, setPlatform] = useState<'instagram' | 'telegram' | 'facebook' | 'youtube'>('instagram');
@@ -46,6 +49,20 @@ const UploadScreen: React.FC = () => {
   const [modalVisible, setModalVisible] = useState(false);
   const [uploadProgress, setUploadProgress] = useState<{ [key: string]: number }>({});
   const [chunkProgress, setChunkProgress] = useState<ChunkProgress>({});
+  
+  // Use ref for cancellation to avoid stale closures
+  const cancelUploadRef = useRef(false);
+  const activeUploadsRef = useRef<Set<string>>(new Set());
+  
+  // Schedule modal states
+  const [scheduleModalVisible, setScheduleModalVisible] = useState(false);
+  const [currentMediaForScheduling, setCurrentMediaForScheduling] = useState<MediaFile | null>(null);
+  const [selectedScheduleType, setSelectedScheduleType] = useState<'range' | 'datetime'>('range');
+  const [scheduledDateTime, setScheduledDateTime] = useState<string>('');
+  const [showDatePicker, setShowDatePicker] = useState(false);
+  const [showTimePicker, setShowTimePicker] = useState(false);
+  const [selectedDate, setSelectedDate] = useState<Date | null>(null);
+  const [selectedTime, setSelectedTime] = useState<Date | null>(null);
 
   useEffect(() => {
     loadUserData();
@@ -90,6 +107,18 @@ const UploadScreen: React.FC = () => {
     }
   };
 
+  const updateScheduledDateTime = (date: Date | null, time: Date | null) => {
+    if (date && time) {
+      const scheduledDate = new Date(date);
+      scheduledDate.setHours(time.getHours());
+      scheduledDate.setMinutes(time.getMinutes());
+      scheduledDate.setSeconds(0);
+      
+      const formattedDateTime = scheduledDate.toISOString().slice(0, 19).replace('T', ' ');
+      setScheduledDateTime(formattedDateTime);
+    }
+  };
+
   const pickMultipleMedia = async (mediaType: 'images' | 'videos' | 'all') => {
     try {
       const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -98,6 +127,7 @@ const UploadScreen: React.FC = () => {
         return;
       }
 
+      // Fixed: Use the new MediaTypeOptions instead of MediaTypeOptionsOptions
       let mediaTypes: any = ImagePicker.MediaTypeOptions.All;
       if (mediaType === 'images') {
         mediaTypes = ImagePicker.MediaTypeOptions.Images;
@@ -131,6 +161,7 @@ const UploadScreen: React.FC = () => {
                 size: fileSize,
                 status: 'pending',
                 selected: true,
+                scheduleType: 'range',
               };
             } catch (error) {
               console.error('Error getting file info:', error);
@@ -142,6 +173,7 @@ const UploadScreen: React.FC = () => {
                 size: 0,
                 status: 'pending',
                 selected: true,
+                scheduleType: 'range',
               };
             }
           })
@@ -152,6 +184,48 @@ const UploadScreen: React.FC = () => {
       console.error('Error picking media:', error);
       Alert.alert('Error', 'Failed to pick media');
     }
+  };
+
+  const openScheduleModal = (media: MediaFile) => {
+    setCurrentMediaForScheduling(media);
+    setSelectedScheduleType(media.scheduleType || 'range');
+    
+    if (media.scheduledDatetime) {
+      const date = new Date(media.scheduledDatetime);
+      setSelectedDate(date);
+      setSelectedTime(date);
+      setScheduledDateTime(media.scheduledDatetime);
+    } else {
+      setSelectedDate(null);
+      setSelectedTime(null);
+      setScheduledDateTime('');
+    }
+    
+    setScheduleModalVisible(true);
+  };
+
+  const saveScheduleSettings = () => {
+    if (!currentMediaForScheduling) return;
+
+    setSelectedMedia(prev =>
+      prev.map(media =>
+        media.id === currentMediaForScheduling.id
+          ? {
+              ...media,
+              scheduleType: selectedScheduleType,
+              scheduledDatetime: selectedScheduleType === 'datetime' ? scheduledDateTime : undefined,
+            }
+          : media
+      )
+    );
+
+    setScheduleModalVisible(false);
+    setShowDatePicker(false);
+    setShowTimePicker(false);
+    setSelectedDate(null);
+    setSelectedTime(null);
+    setScheduledDateTime('');
+    setCurrentMediaForScheduling(null);
   };
 
   const toggleMediaSelection = (mediaId: string) => {
@@ -194,6 +268,31 @@ const UploadScreen: React.FC = () => {
     return selectedMedia.filter(media => media.selected);
   };
 
+  // Add cancel upload function
+  const handleCancelUpload = () => {
+    cancelUploadRef.current = true;
+    setUploading(false);
+    
+    // Reset media statuses
+    setSelectedMedia(prev => 
+      prev.map(media => 
+        media.status === 'uploading' ? { ...media, status: 'pending' } : media
+      )
+    );
+    
+    setModalVisible(false);
+    console.log('📛 Upload cancelled by user');
+    
+    // Clear active uploads
+    activeUploadsRef.current.clear();
+  };
+
+  const checkCancelled = () => {
+    if (cancelUploadRef.current) {
+      throw new Error('Upload cancelled by user');
+    }
+  };
+
   const uploadMedia = async () => {
     if (selectedAccounts.length === 0) {
       Alert.alert('Error', 'Please select at least one account first');
@@ -206,6 +305,9 @@ const UploadScreen: React.FC = () => {
       return;
     }
 
+    // Reset cancellation state
+    cancelUploadRef.current = false;
+    activeUploadsRef.current.clear();
     setUploading(true);
     setSelectedMedia(prev => prev.map(media =>
       media.selected ? { ...media, status: 'uploading' } : media
@@ -221,44 +323,73 @@ const UploadScreen: React.FC = () => {
       batches.push(mediaToUpload.slice(i, i + concurrencyLimit));
     }
 
-    for (const batch of batches) {
-      const batchPromises = batch.map(media => 
-        uploadMediaToAccounts(media, selectedAccounts)
-          .then(result => {
-            if (result.success) successfulUploads++;
-            else failedUploads++;
-          })
-          .catch(() => failedUploads++)
-      );
+    try {
+      for (const batch of batches) {
+        // Check if upload was cancelled
+        checkCancelled();
 
-      await Promise.all(batchPromises);
-    }
+        const batchPromises = batch.map(media => 
+          uploadMediaToAccounts(media, selectedAccounts)
+            .then(result => {
+              if (result.success) successfulUploads++;
+              else failedUploads++;
+            })
+            .catch(() => failedUploads++)
+        );
 
-    setUploading(false);
+        await Promise.all(batchPromises);
+      }
 
-    if (successfulUploads > 0 && failedUploads === 0) {
-      console.log(`✅ SUCCESS: All ${successfulUploads} files uploaded successfully!`);
-      Alert.alert('Success', `All ${successfulUploads} files uploaded successfully to selected accounts!`);
-      setSelectedMedia(prev => prev.filter(media => media.status !== 'completed'));
-      if (getSelectedMedia().length === 0) setModalVisible(false);
-    } else if (successfulUploads > 0) {
-      console.log(`⚠️ PARTIAL: ${successfulUploads} successful, ${failedUploads} failed`);
-      Alert.alert(
-        'Upload Complete',
-        `${successfulUploads} files uploaded successfully, ${failedUploads} failed.`,
-        [{ text: 'OK' }]
-      );
-      setSelectedMedia(prev => prev.filter(media => media.status !== 'completed'));
-    } else {
-      console.log(`❌ FAILED: All ${failedUploads} files failed to upload`);
-      Alert.alert('Upload Failed', 'All files failed to upload. Please try again.');
+      if (cancelUploadRef.current) {
+        Alert.alert('Upload Cancelled', 'Upload was cancelled by user');
+        return;
+      }
+
+      if (successfulUploads > 0 && failedUploads === 0) {
+        console.log(`✅ SUCCESS: All ${successfulUploads} files uploaded successfully!`);
+        Alert.alert('Success', `All ${successfulUploads} files uploaded successfully to selected accounts!`);
+        setSelectedMedia(prev => prev.filter(media => media.status !== 'completed'));
+        if (getSelectedMedia().length === 0) setModalVisible(false);
+      } else if (successfulUploads > 0) {
+        console.log(`⚠️ PARTIAL: ${successfulUploads} successful, ${failedUploads} failed`);
+        Alert.alert(
+          'Upload Complete',
+          `${successfulUploads} files uploaded successfully, ${failedUploads} failed.`,
+          [{ text: 'OK' }]
+        );
+        setSelectedMedia(prev => prev.filter(media => media.status !== 'completed'));
+      } else {
+        console.log(`❌ FAILED: All ${failedUploads} files failed to upload`);
+        Alert.alert('Upload Failed', 'All files failed to upload. Please try again.');
+      }
+    } catch (error) {
+      if (cancelUploadRef.current) {
+        Alert.alert('Upload Cancelled', 'Upload was cancelled by user');
+      } else {
+        console.error('Upload error:', error);
+        Alert.alert('Upload Error', 'An error occurred during upload');
+      }
+    } finally {
+      setUploading(false);
+      cancelUploadRef.current = false;
     }
   };
 
   const uploadMediaToAccounts = async (media: MediaFile, accountIds: string[]): Promise<{ success: boolean }> => {
     try {
+      // Check if already completed before starting
+      const uploadKey = `${media.id}`;
+      if (activeUploadsRef.current.has(uploadKey)) {
+        console.log(`[SKIP] File "${media.name}" is already being uploaded`);
+        return { success: true };
+      }
+
+      activeUploadsRef.current.add(uploadKey);
+
       for (const accountId of accountIds) {
+        checkCancelled();
         await uploadMediaWithRetry(media, accountId);
+        checkCancelled();
         await new Promise(resolve => setTimeout(resolve, 1000));
       }
       
@@ -268,16 +399,37 @@ const UploadScreen: React.FC = () => {
       console.log(`✅ File "${media.name}" uploaded successfully to all accounts`);
       return { success: true };
     } catch (error) {
+      if (cancelUploadRef.current) {
+        console.log(`📛 Upload cancelled for "${media.name}"`);
+        setSelectedMedia(prev =>
+          prev.map(m => m.id === media.id ? { ...m, status: 'pending' } : m)
+        );
+        return { success: false };
+      }
+      
       console.error(`❌ Upload failed for "${media.name}":`, error);
       setSelectedMedia(prev =>
         prev.map(m => m.id === media.id ? { ...m, status: 'failed' } : m)
       );
       return { success: false };
+    } finally {
+      const uploadKey = `${media.id}`;
+      activeUploadsRef.current.delete(uploadKey);
     }
   };
 
   const uploadMediaWithRetry = async (media: MediaFile, accountId: string, retryCount = 0): Promise<void> => {
     try {
+      checkCancelled();
+
+      // Check if this file was already successfully uploaded to THIS account
+      const uploadKey = `${media.id}-${accountId}`;
+      
+      if (uploadProgress[uploadKey] === 100) {
+        console.log(`[SKIP] File "${media.name}" already uploaded to account ${accountId}, skipping`);
+        return;
+      }
+
       if (media.size > CHUNK_SIZE) {
         console.log(`[CHUNKED] Using chunked upload for "${media.name}" (${formatFileSize(media.size)})`);
         await uploadInChunks(media, accountId);
@@ -285,8 +437,18 @@ const UploadScreen: React.FC = () => {
         console.log(`[SINGLE] Using single upload for "${media.name}" (${formatFileSize(media.size)})`);
         await uploadSingleFile(media, accountId);
       }
+      
+      // Mark this file-account combination as completed
+      setUploadProgress(prev => ({
+        ...prev,
+        [uploadKey]: 100
+      }));
+      
       console.log(`[SUCCESS] Successfully uploaded "${media.name}" to account ${accountId}`);
     } catch (error) {
+      // Check if upload was cancelled
+      checkCancelled();
+
       if (retryCount < MAX_RETRIES) {
         console.log(`[RETRY] Retrying upload for "${media.name}" (attempt ${retryCount + 1}/${MAX_RETRIES})`);
         await new Promise(resolve => setTimeout(resolve, 2000 * (retryCount + 1)));
@@ -299,6 +461,8 @@ const UploadScreen: React.FC = () => {
   };
 
   const uploadSingleFile = async (media: MediaFile, accountId: string): Promise<void> => {
+    checkCancelled();
+
     const formData = new FormData();
     formData.append('file', {
       uri: media.uri,
@@ -308,6 +472,11 @@ const UploadScreen: React.FC = () => {
     formData.append('account_id', accountId);
     formData.append('platform', platform);
     formData.append('user_id', user.Id.toString());
+    
+    formData.append('schedule_type', media.scheduleType || 'range');
+    if (media.scheduleType === 'datetime' && media.scheduledDatetime) {
+      formData.append('scheduled_datetime', media.scheduledDatetime);
+    }
 
     const response = await ApiService.uploadMedia(formData);
     
@@ -317,6 +486,8 @@ const UploadScreen: React.FC = () => {
   };
 
   const uploadInChunks = async (media: MediaFile, accountId: string): Promise<void> => {
+    checkCancelled();
+
     const fileInfo = await FileSystem.getInfoAsync(media.uri);
     if (!fileInfo.exists) throw new Error('File not found');
 
@@ -326,6 +497,8 @@ const UploadScreen: React.FC = () => {
     console.log(`[START] Starting chunked upload for "${media.name}": ${totalChunks} chunks`);
 
     for (let chunkIndex = 0; chunkIndex < totalChunks; chunkIndex++) {
+      checkCancelled();
+
       const start = chunkIndex * CHUNK_SIZE;
       const end = Math.min(start + CHUNK_SIZE, media.size);
       
@@ -348,6 +521,11 @@ const UploadScreen: React.FC = () => {
       chunkFormData.append('total_chunks', totalChunks.toString());
       chunkFormData.append('upload_id', uploadId);
       chunkFormData.append('original_name', media.name);
+      
+      chunkFormData.append('schedule_type', media.scheduleType || 'range');
+      if (media.scheduleType === 'datetime' && media.scheduledDatetime) {
+        chunkFormData.append('scheduled_datetime', media.scheduledDatetime);
+      }
 
       try {
         await ApiService.uploadMediaChunk(chunkFormData);
@@ -371,6 +549,8 @@ const UploadScreen: React.FC = () => {
       }
     }
 
+    checkCancelled();
+
     const finalizeFormData = new FormData();
     finalizeFormData.append('upload_id', uploadId);
     finalizeFormData.append('account_id', accountId);
@@ -378,6 +558,11 @@ const UploadScreen: React.FC = () => {
     finalizeFormData.append('user_id', user.Id.toString());
     finalizeFormData.append('original_name', media.name);
     finalizeFormData.append('total_chunks', totalChunks.toString());
+    
+    finalizeFormData.append('schedule_type', media.scheduleType || 'range');
+    if (media.scheduleType === 'datetime' && media.scheduledDatetime) {
+      finalizeFormData.append('scheduled_datetime', media.scheduledDatetime);
+    }
 
     await ApiService.finalizeUpload(finalizeFormData);
     console.log(`[FINAL] All chunks finalized for "${media.name}"`);
@@ -455,6 +640,22 @@ const UploadScreen: React.FC = () => {
         <View style={styles.mediaInfo}>
           <Text style={styles.mediaName} numberOfLines={1}>{item.name}</Text>
           <Text style={styles.fileSize}>{formatFileSize(item.size)}</Text>
+          
+          <View style={styles.scheduleInfo}>
+            <TouchableOpacity 
+              style={styles.scheduleButton}
+              onPress={() => openScheduleModal(item)}
+            >
+              <Text style={styles.scheduleButtonText}>
+                {item.scheduleType === 'datetime' && item.scheduledDatetime 
+                  ? `📅 ${new Date(item.scheduledDatetime).toLocaleString()}`
+                  : item.scheduleType === 'datetime'
+                  ? '📅 Set Date/Time'
+                  : '⏰ Range Schedule'
+                }
+              </Text>
+            </TouchableOpacity>
+          </View>
           
           <View style={styles.statusContainer}>
             <View style={styles.statusWithIcon}>
@@ -629,6 +830,8 @@ const UploadScreen: React.FC = () => {
           </View>
         )}
       </View>
+      
+      {/* Main Media Management Modal */}
       <Modal
         animationType="slide"
         transparent={true}
@@ -712,8 +915,8 @@ const UploadScreen: React.FC = () => {
             <View style={styles.actionButtons}>
               <TouchableOpacity
                 style={styles.cancelButton}
-                onPress={() => setModalVisible(false)}
-                disabled={uploading}
+                onPress={uploading ? handleCancelUpload : () => setModalVisible(false)}
+                disabled={false}
               >
                 <Text style={styles.cancelButtonText}>
                   {uploading ? 'Cancel Upload' : 'Close'}
@@ -737,6 +940,166 @@ const UploadScreen: React.FC = () => {
                 ) : (
                   <Text style={styles.uploadModalButtonText}>Upload Selected ({selectedMediaCount})</Text>
                 )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Schedule Settings Modal */}
+      <Modal
+        animationType="slide"
+        transparent={true}
+        visible={scheduleModalVisible}
+        onRequestClose={() => setScheduleModalVisible(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.scheduleModalContent}>
+            <Text style={styles.scheduleModalTitle}>Schedule Settings</Text>
+            {currentMediaForScheduling && (
+              <Text style={styles.scheduleMediaName}>{currentMediaForScheduling.name}</Text>
+            )}
+            
+            <View style={styles.scheduleTypeContainer}>
+              <Text style={styles.scheduleTypeLabel}>Schedule Type:</Text>
+              <View style={styles.scheduleTypeButtons}>
+                <TouchableOpacity
+                  style={[
+                    styles.scheduleTypeButton,
+                    selectedScheduleType === 'range' && styles.scheduleTypeButtonActive,
+                  ]}
+                  onPress={() => {
+                    setSelectedScheduleType('range');
+                    setScheduledDateTime('');
+                  }}
+                >
+                  <Text style={[
+                    styles.scheduleTypeButtonText,
+                    selectedScheduleType === 'range' && styles.scheduleTypeButtonTextActive,
+                  ]}>
+                    ⏰ Range
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[
+                    styles.scheduleTypeButton,
+                    selectedScheduleType === 'datetime' && styles.scheduleTypeButtonActive,
+                  ]}
+                  onPress={() => setSelectedScheduleType('datetime')}
+                >
+                  <Text style={[
+                    styles.scheduleTypeButtonText,
+                    selectedScheduleType === 'datetime' && styles.scheduleTypeButtonTextActive,
+                  ]}>
+                    📅 Date/Time
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+
+            {selectedScheduleType === 'datetime' && (
+              <View style={styles.datetimeContainer}>
+                <Text style={styles.datetimeLabel}>Select Date & Time:</Text>
+                
+                <View style={styles.pickerContainer}>
+                  <Text style={styles.pickerLabel}>Date:</Text>
+                  <TouchableOpacity
+                    style={styles.pickerButton}
+                    onPress={() => setShowDatePicker(true)}
+                  >
+                    <Text style={styles.pickerButtonText}>
+                      {selectedDate ? selectedDate.toDateString() : 'Select Date'}
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+
+                <View style={styles.pickerContainer}>
+                  <Text style={styles.pickerLabel}>Time:</Text>
+                  <TouchableOpacity
+                    style={styles.pickerButton}
+                    onPress={() => setShowTimePicker(true)}
+                  >
+                    <Text style={styles.pickerButtonText}>
+                      {selectedTime ? selectedTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'Select Time'}
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+
+                {scheduledDateTime && (
+                  <View style={styles.selectedDateTimeContainer}>
+                    <Text style={styles.selectedDateTimeLabel}>Scheduled for:</Text>
+                    <Text style={styles.selectedDateTimeText}>
+                      {new Date(scheduledDateTime).toLocaleString()}
+                    </Text>
+                  </View>
+                )}
+
+                {showDatePicker && (
+                  <DateTimePicker
+                    value={selectedDate || new Date()}
+                    mode="date"
+                    display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+                    onChange={(event, date) => {
+                      setShowDatePicker(false);
+                      if (date) {
+                        setSelectedDate(date);
+                        updateScheduledDateTime(date, selectedTime);
+                      }
+                    }}
+                    minimumDate={new Date()}
+                  />
+                )}
+
+                {showTimePicker && (
+                  <DateTimePicker
+                    value={selectedTime || new Date()}
+                    mode="time"
+                    display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+                    onChange={(event, time) => {
+                      setShowTimePicker(false);
+                      if (time) {
+                        setSelectedTime(time);
+                        updateScheduledDateTime(selectedDate, time);
+                      }
+                    }}
+                  />
+                )}
+              </View>
+            )}
+
+            {selectedScheduleType === 'range' && (
+              <View style={styles.rangeInfo}>
+                <Text style={styles.rangeInfoText}>
+                  This file will be posted randomly within your account's scheduled time range.
+                </Text>
+              </View>
+            )}
+
+            <View style={styles.scheduleModalActions}>
+              <TouchableOpacity
+                style={styles.scheduleCancelButton}
+                onPress={() => {
+                  setScheduleModalVisible(false);
+                  setShowDatePicker(false);
+                  setShowTimePicker(false);
+                  setSelectedDate(null);
+                  setSelectedTime(null);
+                  setScheduledDateTime('');
+                }}
+              >
+                <Text style={styles.scheduleCancelButtonText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.scheduleSaveButton}
+                onPress={saveScheduleSettings}
+                disabled={selectedScheduleType === 'datetime' && !scheduledDateTime}
+              >
+                <Text style={[
+                  styles.scheduleSaveButtonText,
+                  selectedScheduleType === 'datetime' && !scheduledDateTime && styles.scheduleSaveButtonTextDisabled
+                ]}>
+                  Save Schedule
+                </Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -1036,6 +1399,21 @@ const styles = StyleSheet.create({
     color: '#666',
     marginBottom: 4,
   },
+  scheduleInfo: {
+    marginBottom: 4,
+  },
+  scheduleButton: {
+    backgroundColor: '#f0f0f0',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 4,
+    alignSelf: 'flex-start',
+  },
+  scheduleButtonText: {
+    fontSize: 11,
+    color: '#666',
+    fontWeight: '500',
+  },
   statusContainer: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -1163,11 +1541,153 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '500',
   },
+
+  // Schedule Modal Styles
+  scheduleModalContent: {
+    backgroundColor: '#fff',
+    borderRadius: 15,
+    padding: 20,
+    width: '90%',
+    maxHeight: '60%',
+  },
+  scheduleModalTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#333',
+    textAlign: 'center',
+    marginBottom: 10,
+  },
+  scheduleMediaName: {
+    fontSize: 14,
+    color: '#666',
+    textAlign: 'center',
+    marginBottom: 20,
+    fontStyle: 'italic',
+  },
+  scheduleTypeContainer: {
+    marginBottom: 20,
+  },
+  scheduleTypeLabel: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#333',
+    marginBottom: 10,
+  },
+  scheduleTypeButtons: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  scheduleTypeButton: {
+    flex: 1,
+    padding: 12,
+    backgroundColor: '#f8f8f8',
+    borderRadius: 8,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#ddd',
+  },
+  scheduleTypeButtonActive: {
+    backgroundColor: '#007AFF',
+    borderColor: '#007AFF',
+  },
+  scheduleTypeButtonText: {
+    fontSize: 14,
+    color: '#666',
+    fontWeight: '500',
+  },
+  scheduleTypeButtonTextActive: {
+    color: '#fff',
+  },
+  datetimeContainer: {
+    marginBottom: 20,
+  },
+  datetimeLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#333',
+    marginBottom: 8,
+  },
+  pickerContainer: {
+    marginBottom: 15,
+  },
+  pickerLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#333',
+    marginBottom: 8,
+  },
+  pickerButton: {
+    borderWidth: 1,
+    borderColor: '#ddd',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    backgroundColor: '#fff',
+  },
+  pickerButtonText: {
+    fontSize: 14,
+    color: '#333',
+  },
+  selectedDateTimeContainer: {
+    backgroundColor: '#e8f4fd',
+    padding: 12,
+    borderRadius: 8,
+    marginTop: 10,
+  },
+  selectedDateTimeLabel: {
+    fontSize: 12,
+    color: '#007AFF',
+    fontWeight: '500',
+    marginBottom: 4,
+  },
+  selectedDateTimeText: {
+    fontSize: 14,
+    color: '#333',
+    fontWeight: '600',
+  },
+  rangeInfo: {
+    backgroundColor: '#f8f8f8',
+    padding: 12,
+    borderRadius: 8,
+    marginBottom: 20,
+  },
+  rangeInfoText: {
+    fontSize: 14,
+    color: '#666',
+    textAlign: 'center',
+  },
+  scheduleModalActions: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  scheduleCancelButton: {
+    flex: 1,
+    padding: 15,
+    borderRadius: 8,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#ddd',
+  },
+  scheduleCancelButtonText: {
+    fontSize: 16,
+    color: '#666',
+    fontWeight: '500',
+  },
+  scheduleSaveButton: {
+    flex: 1,
+    backgroundColor: '#007AFF',
+    padding: 15,
+    borderRadius: 8,
+    alignItems: 'center',
+  },
+  scheduleSaveButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  scheduleSaveButtonTextDisabled: {
+    opacity: 0.5,
+  },
 });
-
-
-
-
-
 
 export default UploadScreen;

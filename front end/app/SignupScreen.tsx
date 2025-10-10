@@ -44,7 +44,7 @@ const SignupScreen: React.FC = () => {
     }
 
     if (!validatePhoneNumber(phoneNumber)) {
-      Alert.alert('Error', 'Please enter a valid phone number (10-15 digits)');
+      Alert.alert('Error', 'Please enter a valid 10-digit Indian phone number');
       return;
     }
 
@@ -64,7 +64,7 @@ const SignupScreen: React.FC = () => {
         name,
         email,
         password,
-        phone_number: phoneNumber, // Send phone number to API
+        phone_number: phoneNumber,
       });
 
       Alert.alert(
@@ -85,25 +85,16 @@ const SignupScreen: React.FC = () => {
   };
 
   const validatePhoneNumber = (phone: string): boolean => {
-    // Remove any non-digit characters
-    const cleanedPhone = phone.replace(/\D/g, '');
-    // Check if phone number has 10-15 digits
-    return cleanedPhone.length >= 10 && cleanedPhone.length <= 15;
+    // Check for exactly 10 digits
+    return /^\d{10}$/.test(phone);
   };
 
   const formatPhoneNumber = (text: string) => {
     // Remove all non-digit characters
     const cleaned = text.replace(/\D/g, '');
-    
-    // Format as (XXX) XXX-XXXX for better UX
-    let formatted = cleaned;
-    if (cleaned.length > 3 && cleaned.length <= 6) {
-      formatted = `(${cleaned.slice(0, 3)}) ${cleaned.slice(3)}`;
-    } else if (cleaned.length > 6) {
-      formatted = `(${cleaned.slice(0, 3)}) ${cleaned.slice(3, 6)}-${cleaned.slice(6, 10)}`;
-    }
-    
-    setPhoneNumber(formatted);
+    // Limit to 10 digits
+    const limited = cleaned.slice(0, 10);
+    setPhoneNumber(limited);
   };
 
   const navigateToLogin = () => {
@@ -152,13 +143,13 @@ const SignupScreen: React.FC = () => {
                 style={styles.input}
                 value={phoneNumber}
                 onChangeText={formatPhoneNumber}
-                placeholder="(123) 456-7890"
-                keyboardType="phone-pad"
+                placeholder="9876543210"
+                keyboardType="numeric"
                 autoComplete="tel"
-                maxLength={15}
+                maxLength={10}
               />
               <Text style={styles.helperText}>
-                Required for password recovery
+                Enter a 10-digit Indian phone number
               </Text>
             </View>
 

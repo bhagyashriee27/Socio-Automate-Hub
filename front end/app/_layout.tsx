@@ -1,9 +1,10 @@
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createStackNavigator } from '@react-navigation/stack';
-import { NavigationProp, useNavigation } from '@react-navigation/native';
+import { NavigationProp } from '@react-navigation/native';
 import React, { useEffect, useState } from 'react';
-import { ActivityIndicator, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
 import Ionicons from 'react-native-vector-icons/Ionicons';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 // Import screens
 import AccountsScreen from './AccountsScreen';
@@ -20,7 +21,6 @@ import StorageService from '../utils/storage';
 
 // Define navigation param list for typing
 type RootStackParamList = {
-  FrontPage: undefined;
   Login: undefined;
   Signup: undefined;
   ForgotPassword: undefined;
@@ -29,25 +29,6 @@ type RootStackParamList = {
 
 const Stack = createStackNavigator<RootStackParamList>();
 const Tab = createBottomTabNavigator();
-
-// FrontPage without animation
-const FrontPage = () => {
-  const navigation = useNavigation<NavigationProp<RootStackParamList>>();
-
-  const handleLogoClick = () => {
-    navigation.navigate('Login');
-  };
-
-  return (
-    <View style={styles.container}>
-      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
-        <TouchableOpacity onPress={handleLogoClick}>
-          <Text style={styles.logo}>SocioMate</Text>
-        </TouchableOpacity>
-      </View>
-    </View>
-  );
-};
 
 // Main tabs
 const MainTabs = () => (
@@ -60,69 +41,51 @@ const MainTabs = () => (
         borderTopWidth: 1,
         borderTopColor: '#eee',
       },
-      headerTitle: ({ children }) => (
-        <Text style={styles.headerTitle}>{children}</Text>
-      ),
     }}
   >
     <Tab.Screen
       name="Dashboard"
       component={DashboardScreen}
       options={{
-        tabBarLabel: ({ focused }) => (
-          <Text style={[styles.tabBarLabel, { color: focused ? '#1C2526' : '#6B7280' }]}>
-            Dashboard
-          </Text>
-        ),
+        tabBarLabel: 'Dashboard',
         tabBarIcon: ({ color, size }) => <Ionicons name="stats-chart" size={size} color={color} />,
+        headerTitle: 'Dashboard',
       }}
     />
     <Tab.Screen
       name="Accounts"
       component={AccountsScreen}
       options={{
-        tabBarLabel: ({ focused }) => (
-          <Text style={[styles.tabBarLabel, { color: focused ? '#1C2526' : '#6B7280' }]}>
-            Accounts
-          </Text>
-        ),
+        tabBarLabel: 'Accounts',
         tabBarIcon: ({ color, size }) => <Ionicons name="people" size={size} color={color} />,
+        headerTitle: 'Social Media Accounts',
       }}
     />
     <Tab.Screen
       name="Schedule"
       component={ScheduleScreen}
       options={{
-        tabBarLabel: ({ focused }) => (
-          <Text style={[styles.tabBarLabel, { color: focused ? '#1C2526' : '#6B7280' }]}>
-            Schedule
-          </Text>
-        ),
+        tabBarLabel: 'Schedule',
         tabBarIcon: ({ color, size }) => <Ionicons name="calendar" size={size} color={color} />,
+        headerTitle: 'Schedule Posts',
       }}
     />
     <Tab.Screen
       name="Upload"
       component={UploadScreen}
       options={{
-        tabBarLabel: ({ focused }) => (
-          <Text style={[styles.tabBarLabel, { color: focused ? '#1C2526' : '#6B7280' }]}>
-            Upload
-          </Text>
-        ),
+        tabBarLabel: 'Upload',
         tabBarIcon: ({ color, size }) => <Ionicons name="cloud-upload" size={size} color={color} />,
+        headerTitle: 'Upload Media',
       }}
     />
     <Tab.Screen
       name="Profile"
       component={Profile}
       options={{
-        tabBarLabel: ({ focused }) => (
-          <Text style={[styles.tabBarLabel, { color: focused ? '#1C2526' : '#6B7280' }]}>
-            Profile
-          </Text>
-        ),
+        tabBarLabel: 'Profile',
         tabBarIcon: ({ color, size }) => <Ionicons name="person" size={size} color={color} />,
+        headerTitle: 'Profile',
       }}
     />
   </Tab.Navigator>
@@ -150,19 +113,18 @@ export default function Layout() {
 
   if (isLoading) {
     return (
-      <View style={styles.loadingContainer}>
+      <SafeAreaView style={styles.loadingContainer}>
         <ActivityIndicator size="large" color="#1C2526" />
         <Text style={styles.loadingText}>Loading...</Text>
-      </View>
+      </SafeAreaView>
     );
   }
 
   return (
     <Stack.Navigator
-      initialRouteName={isLoggedIn ? 'Main' : 'FrontPage'}
+      initialRouteName={isLoggedIn ? 'Main' : 'Login'}
       screenOptions={{ headerShown: false }}
     >
-      <Stack.Screen name="FrontPage" component={FrontPage} />
       <Stack.Screen name="Login" component={LoginScreen} />
       <Stack.Screen name="Signup" component={SignupScreen} />
       <Stack.Screen
@@ -170,9 +132,7 @@ export default function Layout() {
         component={ForgotPasswordScreen}
         options={{
           headerShown: true,
-          headerTitle: () => (
-            <Text style={styles.headerTitle}>Reset Password</Text>
-          ),
+          title: 'Reset Password',
           headerStyle: {
             backgroundColor: '#03021eff',
           },
@@ -187,7 +147,13 @@ export default function Layout() {
   );
 }
 
-const styles = StyleSheet.create({
+// Define specific types for styles
+interface Styles {
+  loadingContainer: import('react-native').ViewStyle;
+  loadingText: import('react-native').TextStyle;
+}
+
+const styles: Styles = StyleSheet.create({
   loadingContainer: {
     flex: 1,
     justifyContent: 'center',
@@ -198,26 +164,5 @@ const styles = StyleSheet.create({
     marginTop: 16,
     fontSize: 16,
     color: '#6B7280',
-  },
-  container: {
-    flex: 1,
-    backgroundColor: '#4B0082',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  logo: {
-    fontSize: 50,
-    fontWeight: 'bold',
-    color: '#fff',
-    textAlign: 'center',
-  },
-  tabBarLabel: {
-    fontSize: 12,
-    fontWeight: '500',
-  },
-  headerTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#1C2526',
   },
 });

@@ -11,8 +11,8 @@ import {
   TextInput,
 } from 'react-native';
 import { useNavigation, NavigationProp } from '@react-navigation/native';
-import FontAwesome from 'react-native-vector-icons/FontAwesome'; // For Instagram, Telegram, and YouTube icons
-import MaterialIcons from 'react-native-vector-icons/MaterialIcons'; // For Schedule and Upload icons
+import FontAwesome from 'react-native-vector-icons/FontAwesome';
+import MaterialIcons from 'react-native-vector-icons/MaterialIcons';
 import StorageService from '../utils/storage';
 import ApiService from '../services/api';
 import { User, InstagramAccount, TelegramAccount } from '../types';
@@ -49,39 +49,56 @@ const DashboardScreen: React.FC = () => {
     number_of_posts: '5',
     channel_id: '',
   });
+  const [isLoading, setIsLoading] = useState(true); // Add loading state for initial fetch
 
   useEffect(() => {
-    loadUserData();
-    loadDashboardData();
+    const fetchData = async () => {
+      setIsLoading(true);
+      await loadUserDataWithRetry();
+      await loadDashboardData();
+      setIsLoading(false);
+    };
+    fetchData();
   }, []);
 
-  const loadUserData = async () => {
-    try {
-      const userData = await StorageService.getUserData();
-      setUser(userData);
-    } catch (error) {
-      console.error('Error loading user data:', error);
+  const loadUserDataWithRetry = async (retries = 3, delay = 1000): Promise<void> => {
+    for (let attempt = 1; attempt <= retries; attempt++) {
+      try {
+        const userData = await StorageService.getUserData();
+        if (userData && userData.Id) {
+          setUser(userData);
+          return;
+        }
+        console.warn(`Attempt ${attempt}: No user data or user.Id found`);
+        if (attempt < retries) {
+          await new Promise((resolve) => setTimeout(resolve, delay));
+        }
+      } catch (error) {
+        console.error(`Attempt ${attempt}: Error loading user data:`, error);
+        if (attempt < retries) {
+          await new Promise((resolve) => setTimeout(resolve, delay));
+        }
+      }
     }
+    console.error('Failed to load user data after retries');
+    setUser(null);
   };
 
   const loadDashboardData = async () => {
+    if (!user?.Id) {
+      console.warn('No user ID available, skipping dashboard data fetch');
+      return;
+    }
     try {
-      if (!user?.Id) {
-        await loadUserData(); // Ensure user data is loaded
-        if (!user?.Id) return; // Exit if still no user
-      }
-
-      // Fetch user-specific data from /user/<id>
+      setRefreshing(true);
       const response = await ApiService.getUser(user.Id);
       const { instagram_accounts, telegram_channels, facebook_pages, youtube_channels } = response;
 
-      // Calculate stats
       const instagramActive = instagram_accounts.filter((acc: InstagramAccount) => acc.selected === 'Yes').length;
       const telegramActive = telegram_channels.filter((acc: TelegramAccount) => acc.selected === 'Yes').length;
       const facebookActive = facebook_pages.filter((acc: any) => acc.selected === 'Yes').length;
       const youtubeActive = youtube_channels.filter((acc: any) => acc.selected === 'Yes').length;
 
-      // Calculate posts today (posts with next_post_time within today)
       const today = new Date();
       today.setHours(0, 0, 0, 0);
       const tomorrow = new Date(today);
@@ -114,11 +131,14 @@ const DashboardScreen: React.FC = () => {
     } catch (error: any) {
       console.error('Error loading dashboard data:', error);
       Alert.alert('Error', 'Failed to load dashboard data');
+    } finally {
+      setRefreshing(false);
     }
   };
 
   const onRefresh = async () => {
     setRefreshing(true);
+    await loadUserDataWithRetry();
     await loadDashboardData();
     setRefreshing(false);
   };
@@ -156,7 +176,6 @@ const DashboardScreen: React.FC = () => {
 
   const handleAddAccount = async () => {
     try {
-      // Common validation
       const timeRegex = /^([0-1]?[0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]$/;
       if (!timeRegex.test(formData.sch_start_range) || !timeRegex.test(formData.sch_end_range)) {
         Alert.alert('Error', 'Please enter valid time in HH:MM:SS format (e.g., 09:00:00)');
@@ -227,7 +246,6 @@ const DashboardScreen: React.FC = () => {
     }
   };
 
-  // Get greeting based on time of day
   const getGreeting = () => {
     const hour = new Date().getHours();
     if (hour >= 5 && hour < 12) return 'Good Morning';
@@ -235,16 +253,23 @@ const DashboardScreen: React.FC = () => {
     return 'Good Evening';
   };
 
-  // Get formatted date (without time)
   const getFormattedDate = () => {
     const date = new Date();
     return date.toLocaleDateString('en-US', {
       weekday: 'long',
       month: 'long',
       day: 'numeric',
-      timeZone: 'Asia/Kolkata', // IST
+      timeZone: 'Asia/Kolkata',
     });
   };
+
+  if (isLoading) {
+    return (
+      <View style={styles.container}>
+        <Text style={styles.loadingText}>Loading Dashboard...</Text>
+      </View>
+    );
+  }
 
   return (
     <View style={styles.container}>
@@ -326,7 +351,6 @@ const DashboardScreen: React.FC = () => {
         </View>
       </ScrollView>
 
-      {/* New Circular Upload Form Button at Bottom Left */}
       <TouchableOpacity style={styles.uploadButton} onPress={handleUploadForm}>
         <Text style={styles.uploadButtonText}>+</Text>
       </TouchableOpacity>
@@ -456,6 +480,8 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#b4c5d8',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   scrollView: {
     flex: 1,
@@ -649,15 +675,11 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
   },
+  loadingText: {
+    fontSize: 16,
+    color: '#666',
+    marginTop: 10,
+  },
 });
-
-
-
-
-
-
-
-
-
 
 export default DashboardScreen;
