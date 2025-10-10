@@ -144,71 +144,71 @@ const UploadScreen: React.FC = () => {
 };
 
   const pickMultipleMedia = async (mediaType: 'images' | 'videos' | 'all') => {
-    try {
-      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-      if (status !== 'granted') {
-        Alert.alert('Permission required', 'Sorry, we need camera roll permissions to make this work!');
-        return;
-      }
-
-      // Use MediaTypeOptions as requested
-      let mediaTypes: any = ImagePicker.MediaTypeOptions.All;
-      if (mediaType === 'images') {
-        mediaTypes = ImagePicker.MediaTypeOptions.Images;
-      } else if (mediaType === 'videos') {
-        mediaTypes = ImagePicker.MediaTypeOptions.Videos;
-      }
-
-      const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes,
-        allowsMultipleSelection: true,
-        quality: 0.8,
-        orderedSelection: true,
-      });
-
-      if (!result.canceled && result.assets) {
-        const newMedia: MediaFile[] = await Promise.all(
-          result.assets.map(async (asset, index) => {
-            try {
-              const fileInfo = await FileSystem.getInfoAsync(asset.uri);
-              let fileSize = 0;
-              
-              if (fileInfo.exists && 'size' in fileInfo) {
-                fileSize = fileInfo.size || 0;
-              }
-
-              return {
-                id: `${Date.now()}-${index}`,
-                uri: asset.uri,
-                type: asset.type === 'video' ? 'video' : 'image',
-                name: asset.fileName || `media-${Date.now()}-${index}.${asset.type === 'video' ? 'mp4' : 'jpg'}`,
-                size: fileSize,
-                status: 'pending',
-                selected: true,
-                scheduleType: 'range',
-              };
-            } catch (error) {
-              console.error('Error getting file info:', error);
-              return {
-                id: `${Date.now()}-${index}`,
-                uri: asset.uri,
-                type: asset.type === 'video' ? 'video' : 'image',
-                name: asset.fileName || `media-${Date.now()}-${index}.${asset.type === 'video' ? 'mp4' : 'jpg'}`,
-                size: 0,
-                status: 'pending',
-                selected: true,
-                scheduleType: 'range',
-              };
-            }
-          })
-        );
-        setSelectedMedia(prev => [...prev, ...newMedia]);
-      }
-    } catch (error) {
-      console.error('Error picking media:', error);
-      Alert.alert('Error', 'Failed to pick media');
+  try {
+    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (status !== 'granted') {
+      Alert.alert('Permission required', 'Sorry, we need camera roll permissions to make this work!');
+      return;
     }
-  };
+
+    // Use array format for mediaTypes to fix the deprecation warning
+    let mediaTypes: ImagePicker.MediaTypeOptions[] = [ImagePicker.MediaTypeOptions.Images, ImagePicker.MediaTypeOptions.Videos];
+    if (mediaType === 'images') {
+      mediaTypes = [ImagePicker.MediaTypeOptions.Images];
+    } else if (mediaType === 'videos') {
+      mediaTypes = [ImagePicker.MediaTypeOptions.Videos];
+    }
+
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: mediaTypes.length === 2 ? ImagePicker.MediaTypeOptions.All : mediaTypes[0],
+      allowsMultipleSelection: true,
+      quality: 0.8,
+      orderedSelection: true,
+    });
+
+    if (!result.canceled && result.assets) {
+      const newMedia: MediaFile[] = await Promise.all(
+        result.assets.map(async (asset, index) => {
+          try {
+            const fileInfo = await FileSystem.getInfoAsync(asset.uri);
+            let fileSize = 0;
+            
+            if (fileInfo.exists && 'size' in fileInfo) {
+              fileSize = fileInfo.size || 0;
+            }
+
+            return {
+              id: `${Date.now()}-${index}`,
+              uri: asset.uri,
+              type: asset.type === 'video' ? 'video' : 'image',
+              name: asset.fileName || `media-${Date.now()}-${index}.${asset.type === 'video' ? 'mp4' : 'jpg'}`,
+              size: fileSize,
+              status: 'pending',
+              selected: true,
+              scheduleType: 'range',
+            };
+          } catch (error) {
+            console.error('Error getting file info:', error);
+            return {
+              id: `${Date.now()}-${index}`,
+              uri: asset.uri,
+              type: asset.type === 'video' ? 'video' : 'image',
+              name: asset.fileName || `media-${Date.now()}-${index}.${asset.type === 'video' ? 'mp4' : 'jpg'}`,
+              size: 0,
+              status: 'pending',
+              selected: true,
+              scheduleType: 'range',
+            };
+          }
+        })
+      );
+      setSelectedMedia(prev => [...prev, ...newMedia]);
+    }
+  } catch (error) {
+    console.error('Error picking media:', error);
+    Alert.alert('Error', 'Failed to pick media');
+  }
+};
 
   const openScheduleModal = (media: MediaFile) => {
     setCurrentMediaForScheduling(media);
@@ -667,107 +667,146 @@ const UploadScreen: React.FC = () => {
 
 
 
-  
-  const MediaItem = ({ item }: { item: MediaFile }) => {
-    const currentChunkProgress = chunkProgress[item.id];
-    
-    const getStatusDisplay = () => {
-      switch (item.status) {
-        case 'completed': return { text: 'Completed', color: '#34C759', icon: '✓' };
-        case 'uploading': return { text: 'Uploading', color: '#007AFF', icon: '↻' };
-        case 'failed': return { text: 'Failed', color: '#FF3B30', icon: '✗' };
-        default: return { text: 'Pending', color: '#8E8E93', icon: '…' };
-      }
-    };
 
-    const status = getStatusDisplay();
-    
-    return (
-      <TouchableOpacity
-        style={[
-          styles.mediaItem,
-          item.selected && styles.mediaItemSelected,
-        ]}
-        onPress={() => toggleMediaSelection(item.id)}
-        onLongPress={() => removeMedia(item.id)}
-      >
-        <View style={styles.checkboxContainer}>
-          <View style={[
-            styles.checkbox,
-            item.selected && styles.checkboxSelected,
-          ]}>
-            {item.selected && (
-              <View style={styles.checkboxTick}>
-                <Text style={styles.checkboxTickText}>✓</Text>
-              </View>
-            )}
-          </View>
-        </View>
-        <View style={styles.mediaPreview}>
-          {item.type === 'image' ? (
-            <Image source={{ uri: item.uri }} style={styles.mediaThumbnail} />
-          ) : (
-            <View style={[styles.mediaThumbnail, styles.videoThumbnail]}>
-              <Text style={styles.videoIcon}>▶</Text>
+  const MediaItem = ({ item }: { item: MediaFile }) => {
+  const currentChunkProgress = chunkProgress[item.id];
+  
+  const getStatusDisplay = () => {
+    switch (item.status) {
+      case 'completed': 
+        return { text: 'Completed', color: '#34C759', icon: '✓' };
+      case 'uploading': 
+        return { text: 'Uploading', color: '#007AFF', icon: '↻' };
+      case 'failed': 
+        return { text: 'Failed', color: '#FF3B30', icon: '✗' };
+      default: 
+        return { text: 'Pending', color: '#8E8E93', icon: '…' };
+    }
+  };
+
+  const status = getStatusDisplay();
+  
+  // Helper function to safely render schedule text
+  const renderScheduleText = () => {
+    if (item.scheduleType === 'datetime' && item.scheduledDatetime) {
+      return `📅 ${new Date(item.scheduledDatetime).toLocaleString()}`;
+    } else if (item.scheduleType === 'datetime') {
+      return '📅 Set Date/Time';
+    } else {
+      return '⏰ Range Schedule';
+    }
+  };
+
+  return (
+    <TouchableOpacity
+      style={[
+        styles.mediaItem,
+        item.selected && styles.mediaItemSelected,
+      ]}
+      onPress={() => toggleMediaSelection(item.id)}
+      onLongPress={() => removeMedia(item.id)}
+    >
+      {/* Checkbox */}
+      <View style={styles.checkboxContainer}>
+        <View style={[
+          styles.checkbox,
+          item.selected && styles.checkboxSelected,
+        ]}>
+          {item.selected && (
+            <View style={styles.checkboxTick}>
+              <Text style={styles.checkboxTickText}>✓</Text>
             </View>
           )}
         </View>
-        <View style={styles.mediaInfo}>
-          <Text style={styles.mediaName} numberOfLines={1}>{item.name}</Text>
-          <Text style={styles.fileSize}>{formatFileSize(item.size)}</Text>
-          
-          <View style={styles.scheduleInfo}>
-            <TouchableOpacity 
-              style={styles.scheduleButton}
-              onPress={() => openScheduleModal(item)}
-            >
-              <Text style={styles.scheduleButtonText}>
-                {item.scheduleType === 'datetime' && item.scheduledDatetime 
-                  ? `📅 ${new Date(item.scheduledDatetime).toLocaleString()}`
-                  : item.scheduleType === 'datetime'
-                  ? '📅 Set Date/Time'
-                  : '⏰ Range Schedule'
-                }
-              </Text>
-            </TouchableOpacity>
+      </View>
+
+      {/* Media Preview */}
+      <View style={styles.mediaPreview}>
+        {item.type === 'image' ? (
+          <Image source={{ uri: item.uri }} style={styles.mediaThumbnail} />
+        ) : (
+          <View style={[styles.mediaThumbnail, styles.videoThumbnail]}>
+            <Text style={styles.videoIcon}>▶</Text>
+          </View>
+        )}
+      </View>
+
+      {/* Media Info */}
+      <View style={styles.mediaInfo}>
+        {/* File Name */}
+        <Text style={styles.mediaName} numberOfLines={1}>
+          {item.name || 'Unknown File'}
+        </Text>
+        
+        {/* File Size */}
+        <Text style={styles.fileSize}>
+          {formatFileSize(item.size)}
+        </Text>
+        
+        {/* Schedule Info */}
+        <View style={styles.scheduleInfo}>
+          <TouchableOpacity 
+            style={styles.scheduleButton}
+            onPress={() => openScheduleModal(item)}
+          >
+            <Text style={styles.scheduleButtonText}>
+              {renderScheduleText()}
+            </Text>
+          </TouchableOpacity>
+        </View>
+        
+        {/* Status Container */}
+        <View style={styles.statusContainer}>
+          <View style={styles.statusWithIcon}>
+            <Text style={styles.statusIcon}>
+              {status.icon}
+            </Text>
+            <Text style={[styles.statusText, { color: status.color }]}>
+              {status.text}
+            </Text>
           </View>
           
-          <View style={styles.statusContainer}>
-            <View style={styles.statusWithIcon}>
-              <Text style={styles.statusIcon}>{status.icon}</Text>
-              <Text style={[styles.statusText, { color: status.color }]}>
-                {status.text}
-              </Text>
-            </View>
-            {item.status === 'uploading' && uploadProgress[item.id] && (
-              <Text style={styles.progressText}>{Math.round(uploadProgress[item.id])}%</Text>
-            )}
-          </View>
-          
-          {currentChunkProgress && (
-            <Text style={styles.chunkProgressText}>
-              Chunk: {currentChunkProgress.uploaded}/{currentChunkProgress.total}
+          {/* Progress Percentage */}
+          {item.status === 'uploading' && uploadProgress[item.id] !== undefined && (
+            <Text style={styles.progressText}>
+              {Math.round(uploadProgress[item.id])}%
             </Text>
           )}
-          
-          {item.status === 'uploading' && (
-            <View style={styles.progressBar}>
-              <View style={[styles.progressFill, { width: `${uploadProgress[item.id] || 0}%` }]} />
-            </View>
-          )}
         </View>
-        <TouchableOpacity
-          style={styles.removeMediaButton}
-          onPress={() => removeMedia(item.id)}
-          disabled={item.status === 'uploading'}
-        >
-          <View style={styles.removeMediaButtonInner}>
-            <Text style={styles.removeMediaText}>×</Text>
+        
+        {/* Chunk Progress */}
+        {currentChunkProgress && (
+          <Text style={styles.chunkProgressText}>
+            Chunk: {currentChunkProgress.uploaded}/{currentChunkProgress.total}
+          </Text>
+        )}
+        
+        {/* Progress Bar */}
+        {item.status === 'uploading' && (
+          <View style={styles.progressBar}>
+            <View 
+              style={[
+                styles.progressFill, 
+                { width: `${uploadProgress[item.id] || 0}%` }
+              ]} 
+            />
           </View>
-        </TouchableOpacity>
+        )}
+      </View>
+
+      {/* Remove Button */}
+      <TouchableOpacity
+        style={styles.removeMediaButton}
+        onPress={() => removeMedia(item.id)}
+        disabled={item.status === 'uploading'}
+      >
+        <View style={styles.removeMediaButtonInner}>
+          <Text style={styles.removeMediaText}>×</Text>
+        </View>
       </TouchableOpacity>
-    );
-  };
+    </TouchableOpacity>
+  );
+};
 
   const formatFileSize = (bytes: number): string => {
     if (bytes === 0) return '0 B';
