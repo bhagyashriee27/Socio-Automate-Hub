@@ -12,10 +12,7 @@ import {
   ApiResponse,
 } from '../types';
 
-
-
-
-const BASE_URL = 'https://monitor-renewing-oarfish.ngrok-free.app'; // https://credible-mastodon-fully.ngrok-free.app   https://monitor-renewing-oarfish.ngrok-free.app
+const BASE_URL = 'https://monitor-renewing-oarfish.ngrok-free.app';
 const api = axios.create({
   baseURL: BASE_URL,
   timeout: 10000,
@@ -223,6 +220,73 @@ export class ApiService {
     }
   }
 
+  // Delete media from Google Drive and schedule
+  static async deleteMediaFromDrive(
+    platform: 'instagram' | 'telegram' | 'facebook' | 'youtube',
+    accountId: number,
+    fileId: string
+  ): Promise<ApiResponse> {
+    try {
+      const response: AxiosResponse<ApiResponse> = await api.delete(`/delete-media`, {
+        data: {
+          platform,
+          account_id: accountId,
+          file_id: fileId
+        }
+      });
+      return response.data;
+    } catch (error: any) {
+      throw new Error(error.response?.data?.error || 'Failed to delete media');
+    }
+  }
+
+  // Update individual media schedule
+  static async updateMediaSchedule(
+    platform: 'instagram' | 'telegram' | 'facebook' | 'youtube',
+    accountId: number,
+    mediaData: any
+  ): Promise<ApiResponse> {
+    try {
+      const response: AxiosResponse<ApiResponse> = await api.patch(`/update-media-schedule`, {
+        platform,
+        account_id: accountId,
+        media_data: mediaData
+      });
+      return response.data;
+    } catch (error: any) {
+      throw new Error(error.response?.data?.error || 'Failed to update media schedule');
+    }
+  }
+
+  // Update custom schedule data (entire schedule array)
+  static async updateCustomSchedule(
+    platform: 'instagram' | 'telegram' | 'facebook' | 'youtube',
+    accountId: number,
+    customScheduleData: any[]
+  ): Promise<ApiResponse> {
+    try {
+      const response: AxiosResponse<ApiResponse> = await api.patch(`/${platform}/${accountId}/custom-schedule`, {
+        custom_schedule_data: customScheduleData
+      });
+      return response.data;
+    } catch (error: any) {
+      throw new Error(error.response?.data?.error || 'Failed to update custom schedule');
+    }
+  }
+
+  // Get custom schedule data
+  static async getCustomSchedule(
+    platform: 'instagram' | 'telegram' | 'facebook' | 'youtube',
+    accountId: number
+  ): Promise<any> {
+    try {
+      const response: AxiosResponse<any> = await api.get(`/${platform}/${accountId}/custom-schedule`);
+      return response.data;
+    } catch (error: any) {
+      throw new Error(error.response?.data?.error || 'Failed to fetch custom schedule');
+    }
+  }
+
   static async getUser(userId: number): Promise<{
     user: User;
     instagram_accounts: InstagramAccount[];
@@ -385,35 +449,6 @@ export class ApiService {
       return response.data;
     } catch (error: any) {
       throw new Error(error.response?.data?.error || 'Failed to export data');
-    }
-  }
-
-  // NEW: Update Custom Schedule Data
-  static async updateCustomSchedule(
-    platform: 'instagram' | 'telegram' | 'facebook' | 'youtube',
-    accountId: number,
-    scheduleData: any[]
-  ): Promise<ApiResponse> {
-    try {
-      const response: AxiosResponse<ApiResponse> = await api.patch(`/${platform}/${accountId}/custom-schedule`, {
-        custom_schedule_data: scheduleData
-      });
-      return response.data;
-    } catch (error: any) {
-      throw new Error(error.response?.data?.error || 'Failed to update custom schedule');
-    }
-  }
-
-  // NEW: Get Custom Schedule Data
-  static async getCustomSchedule(
-    platform: 'instagram' | 'telegram' | 'facebook' | 'youtube',
-    accountId: number
-  ): Promise<any> {
-    try {
-      const response: AxiosResponse<any> = await api.get(`/${platform}/${accountId}/custom-schedule`);
-      return response.data;
-    } catch (error: any) {
-      throw new Error(error.response?.data?.error || 'Failed to fetch custom schedule');
     }
   }
 }

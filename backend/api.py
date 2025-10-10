@@ -827,6 +827,172 @@ def update_telegram(record_id):
     except mysql.connector.Error as e:
         conn.close()
         return jsonify({"error": f"Database error: {str(e)}"}), 500
+@app.route('/delete-media', methods=['DELETE'])
+def delete_media():
+    """Delete media from Google Drive and schedule."""
+    data = request.get_json()
+    platform = data.get('platform')
+    account_id = data.get('account_id')
+    file_id = data.get('file_id')
+
+    if not all([platform, account_id, file_id]):
+        return jsonify({"error": "Missing required parameters"}), 400
+
+    if platform not in ['instagram', 'telegram', 'facebook', 'youtube']:
+        return jsonify({"error": "Invalid platform"}), 400
+
+    conn = get_db_connection()
+    if not conn:
+        return jsonify({"error": "Database connection failed"}), 500
+
+    try:
+        cursor = conn.cursor(dictionary=True)
+        
+        # Get account details for Drive credentials
+        if platform == 'youtube':
+            cursor.execute(f"SELECT token_sesson FROM {platform} WHERE id = %s", (account_id,))
+        else:
+            cursor.execute(f"SELECT token_drive FROM {platform} WHERE id = %s", (account_id,))
+            
+        account = cursor.fetchone()
+        
+        if not account:
+            cursor.close()
+            conn.close()
+            return jsonify({"error": "Account not found"}), 404
+
+        # Delete from Google Drive
+        token_data = account.get('token_sesson' if platform == 'youtube' else 'token_drive', '{}')
+        if token_data and token_data != "{}":
+            try:
+                token_drive = json.loads(token_data)
+                creds = Credentials.from_authorized_user_info(token_drive, SCOPES)
+                if creds and creds.expired and creds.refresh_token:
+                    creds.refresh(Request())
+                
+                service = build('drive', 'v3', credentials=creds)
+                service.files().delete(fileId=file_id).execute()
+                print(f"✅ Deleted file from Google Drive: {file_id}")
+            except Exception as e:
+                print(f"⚠️ Could not delete from Google Drive: {str(e)}")
+                # Continue with database deletion even if Drive delete fails
+
+        # Remove from custom_schedule_data
+        cursor.execute(f"SELECT custom_schedule_data FROM {platform} WHERE id = %s", (account_id,))
+        result = cursor.fetchone()
+        
+        if result and result['custom_schedule_data']:
+            try:
+                schedule_data = json.loads(result['custom_schedule_data'])
+                if isinstance(schedule_data, list):
+                    # Filter out the deleted media
+                    updated_schedule = [item for item in schedule_data if item.get('file_id') != file_id]
+                    updated_schedule_json = json.dumps(updated_schedule)
+                    
+                    # Update database
+                    cursor.execute(f"UPDATE {platform} SET custom_schedule_data = %s WHERE id = %s", 
+                                 (updated_schedule_json, account_id))
+                    conn.commit()
+            except json.JSONDecodeError:
+                pass
+
+        cursor.close()
+        conn.close()
+        
+        return jsonify({"message": "Media deleted successfully"}), 200
+
+    except Exception as e:
+        conn.close()
+        return jsonify({"error": f"Failed to delete media: {str(e)}"}), 500
+
+
+@app.route('/update-media-schedule', methods=['PATCH'])
+def update_media_schedule():
+    """Update individual media schedule."""
+    data = request.get_json()
+    platform = data.get('platform')
+    account_id = data.get('account_id')
+    media_data = data.get('media_data')
+
+    if not all([platform, account_id, media_data]):
+        return jsonify({"error": "Missing required parameters"}), 400
+
+    if platform not in ['instagram', 'telegram', 'facebook', 'youtube']:
+        return jsonify({"error": "Invalid platform"}), 400
+
+    # FIXED: Validate media_data format properly
+    try:
+        if not isinstance(media_data, dict):
+            return jsonify({"error": "media_data must be an object"}), 400
+        
+        # Validate required fields
+        required_fields = ['media_name', 'file_id']
+        for field in required_fields:
+            if field not in media_data:
+                return jsonify({"error": f"Missing required field: {field}"}), 400
+        
+        # Only validate datetime if provided and not None
+        scheduled_datetime = media_data.get('scheduled_datetime')
+        if scheduled_datetime is not None:
+            try:
+                datetime.strptime(scheduled_datetime, '%Y-%m-%d %H:%M:%S')
+            except ValueError:
+                return jsonify({"error": "Invalid datetime format. Use YYYY-MM-DD HH:MM:SS"}), 400
+                
+    except Exception as e:
+        return jsonify({"error": f"Invalid media_data format: {str(e)}"}), 400
+
+    conn = get_db_connection()
+    if not conn:
+        return jsonify({"error": "Database connection failed"}), 500
+
+    try:
+        cursor = conn.cursor(dictionary=True)
+        
+        # Get current schedule data
+        cursor.execute(f"SELECT custom_schedule_data FROM {platform} WHERE id = %s", (account_id,))
+        result = cursor.fetchone()
+        
+        current_schedule_data = []
+        if result and result['custom_schedule_data']:
+            try:
+                current_schedule_data = json.loads(result['custom_schedule_data'])
+                if not isinstance(current_schedule_data, list):
+                    current_schedule_data = []
+            except json.JSONDecodeError:
+                current_schedule_data = []
+
+        # Update the specific media item
+        updated_schedule = []
+        for item in current_schedule_data:
+            if (item.get('media_name') == media_data.get('media_name') and 
+                item.get('file_id') == media_data.get('file_id')):
+                updated_schedule.append(media_data)
+            else:
+                updated_schedule.append(item)
+
+        # Update database
+        updated_schedule_json = json.dumps(updated_schedule)
+        cursor.execute(f"UPDATE {platform} SET custom_schedule_data = %s WHERE id = %s", 
+                     (updated_schedule_json, account_id))
+        conn.commit()
+        cursor.close()
+        conn.close()
+
+        return jsonify({"message": "Media schedule updated successfully"}), 200
+
+    except Exception as e:
+        conn.close()
+        return jsonify({"error": f"Failed to update media schedule: {str(e)}"}), 500
+
+
+
+
+
+
+
+
+
 
 
 @app.route('/upload-media-chunk', methods=['POST'])
@@ -941,7 +1107,7 @@ def update_custom_schedule(platform, record_id):
     data = request.get_json()
     custom_schedule_data = data.get('custom_schedule_data')
 
-    # Validate custom_schedule_data format
+    # Validate custom_schedule_data format - FIXED: Handle None values properly
     if custom_schedule_data is not None:
         try:
             # Validate it's a list
@@ -953,16 +1119,18 @@ def update_custom_schedule(platform, record_id):
                 if not isinstance(item, dict):
                     return jsonify({"error": "Each schedule item must be an object"}), 400
                 
-                required_fields = ['media_name', 'scheduled_datetime', 'file_id']
+                required_fields = ['media_name', 'file_id']
                 for field in required_fields:
                     if field not in item:
                         return jsonify({"error": f"Missing required field: {field}"}), 400
                 
-                # Validate datetime format
-                try:
-                    datetime.strptime(item['scheduled_datetime'], '%Y-%m-%d %H:%M:%S')
-                except ValueError:
-                    return jsonify({"error": "Invalid datetime format. Use YYYY-MM-DD HH:MM:SS"}), 400
+                # FIXED: Only validate datetime if it's provided and not None
+                scheduled_datetime = item.get('scheduled_datetime')
+                if scheduled_datetime is not None:
+                    try:
+                        datetime.strptime(scheduled_datetime, '%Y-%m-%d %H:%M:%S')
+                    except ValueError:
+                        return jsonify({"error": "Invalid datetime format. Use YYYY-MM-DD HH:MM:SS"}), 400
 
             # Convert to JSON string for storage
             custom_schedule_json = json.dumps(custom_schedule_data)
