@@ -175,7 +175,6 @@ const UploadScreen: React.FC = () => {
     }
   };
 
-  // FIXED: Proper modal opening with console logs
   const openScheduleModal = (media: MediaFile) => {
     console.log('✅ Opening schedule modal for:', media.name);
     setCurrentMediaForScheduling(media);
@@ -685,7 +684,7 @@ const UploadScreen: React.FC = () => {
             {formatFileSize(item.size)}
           </Text>
           
-          {/* FIXED: Schedule Button with proper touch handling */}
+          {/* Schedule Button with proper touch handling */}
           <TouchableOpacity 
             style={styles.scheduleButton}
             onPress={() => openScheduleModal(item)}
@@ -696,7 +695,7 @@ const UploadScreen: React.FC = () => {
             </Text>
           </TouchableOpacity>
           
-          {/* FIXED: Caption Button with proper touch handling */}
+          {/* Caption Button with proper touch handling */}
           <TouchableOpacity 
             style={styles.captionButton}
             onPress={() => openCaptionModal(item)}
@@ -1002,7 +1001,7 @@ const UploadScreen: React.FC = () => {
         </View>
       </Modal>
 
-      {/* Schedule Settings Modal - FIXED for iOS */}
+      {/* Schedule Settings Modal - The nested modal structure with flex: 1 on overlay is the key fix */}
       <Modal
         animationType="slide"
         transparent={true}
@@ -1171,7 +1170,7 @@ const UploadScreen: React.FC = () => {
         </View>
       </Modal>
 
-      {/* Caption Modal - FIXED for iOS */}
+      {/* Caption Modal - The nested modal structure with flex: 1 on overlay is the key fix */}
       <Modal
         animationType="slide"
         transparent={true}
