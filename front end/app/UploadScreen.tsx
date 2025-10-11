@@ -10,13 +10,14 @@ import {
   Modal,
   FlatList,
   Platform,
+  TextInput,
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import * as FileSystem from 'expo-file-system/legacy';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import ApiService from '../services/api';
 import StorageService from '../utils/storage';
-import { InstagramAccount, TelegramAccount, FacebookAccount, YouTubeAccount, ApiResponse } from '../types';
+import { InstagramAccount, TelegramAccount, YouTubeAccount, ApiResponse } from '../types';
 
 interface MediaFile {
   id: string;
@@ -28,27 +29,20 @@ interface MediaFile {
   progress?: number;
   selected?: boolean;
   chunkProgress?: { uploaded: number; total: number };
-  scheduleType?: 'range' | 'datetime';
+  scheduleType: 'range' | 'datetime';
   scheduledDatetime?: string;
+  caption: string;
 }
 
 interface ChunkProgress {
   [key: string]: { uploaded: number; total: number };
 }
 
-// Extended interface for upload responses
-interface UploadResponse extends ApiResponse {
-  success?: boolean;
-  file_id?: string;
-  drive_link?: string;
-  file_name?: string;
-}
-
 const CHUNK_SIZE = 2 * 1024 * 1024;
-const MAX_RETRIES = 12;
+const MAX_RETRIES = 3;
 
 const UploadScreen: React.FC = () => {
-  const [platform, setPlatform] = useState<'instagram' | 'telegram' | 'facebook' | 'youtube'>('instagram');
+  const [platform, setPlatform] = useState<'instagram' | 'telegram' | 'youtube'>('instagram');
   const [accounts, setAccounts] = useState<any[]>([]);
   const [selectedAccounts, setSelectedAccounts] = useState<string[]>([]);
   const [selectedMedia, setSelectedMedia] = useState<MediaFile[]>([]);
@@ -58,7 +52,6 @@ const UploadScreen: React.FC = () => {
   const [uploadProgress, setUploadProgress] = useState<{ [key: string]: number }>({});
   const [chunkProgress, setChunkProgress] = useState<ChunkProgress>({});
   
-  // Use ref for cancellation to avoid stale closures
   const cancelUploadRef = useRef(false);
   const activeUploadsRef = useRef<Set<string>>(new Set());
   
@@ -71,6 +64,11 @@ const UploadScreen: React.FC = () => {
   const [showTimePicker, setShowTimePicker] = useState(false);
   const [selectedDate, setSelectedDate] = useState<Date | null>(null);
   const [selectedTime, setSelectedTime] = useState<Date | null>(null);
+
+  // Caption modal states
+  const [captionModalVisible, setCaptionModalVisible] = useState(false);
+  const [currentMediaForCaption, setCurrentMediaForCaption] = useState<MediaFile | null>(null);
+  const [captionText, setCaptionText] = useState('');
 
   useEffect(() => {
     loadUserData();
@@ -116,103 +114,72 @@ const UploadScreen: React.FC = () => {
   };
 
   const updateScheduledDateTime = (date: Date | null, time: Date | null) => {
-  if (date && time) {
-    // Create a new date combining both date and time
-    const scheduledDate = new Date(date);
-    
-    // Set the time components directly without timezone conversion
-    scheduledDate.setHours(time.getHours());
-    scheduledDate.setMinutes(time.getMinutes());
-    scheduledDate.setSeconds(0);
-    scheduledDate.setMilliseconds(0);
-    
-    // Format to ISO string without timezone conversion
-    const year = scheduledDate.getFullYear();
-    const month = String(scheduledDate.getMonth() + 1).padStart(2, '0');
-    const day = String(scheduledDate.getDate()).padStart(2, '0');
-    const hours = String(scheduledDate.getHours()).padStart(2, '0');
-    const minutes = String(scheduledDate.getMinutes()).padStart(2, '0');
-    const seconds = String(scheduledDate.getSeconds()).padStart(2, '0');
-    
-    const formattedDateTime = `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
-    setScheduledDateTime(formattedDateTime);
-    
-    console.log('Selected Date:', date.toDateString());
-    console.log('Selected Time:', time.toTimeString());
-    console.log('Combined DateTime:', formattedDateTime);
-  }
-};
+    if (date && time) {
+      const scheduledDate = new Date(date);
+      scheduledDate.setHours(time.getHours());
+      scheduledDate.setMinutes(time.getMinutes());
+      scheduledDate.setSeconds(0);
+      scheduledDate.setMilliseconds(0);
+      
+      const year = scheduledDate.getFullYear();
+      const month = String(scheduledDate.getMonth() + 1).padStart(2, '0');
+      const day = String(scheduledDate.getDate()).padStart(2, '0');
+      const hours = String(scheduledDate.getHours()).padStart(2, '0');
+      const minutes = String(scheduledDate.getMinutes()).padStart(2, '0');
+      const seconds = String(scheduledDate.getSeconds()).padStart(2, '0');
+      
+      const formattedDateTime = `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
+      setScheduledDateTime(formattedDateTime);
+    }
+  };
 
   const pickMultipleMedia = async (mediaType: 'images' | 'videos' | 'all') => {
-  try {
-    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (status !== 'granted') {
-      Alert.alert('Permission required', 'Sorry, we need camera roll permissions to make this work!');
-      return;
+    try {
+      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert('Permission required', 'Sorry, we need camera roll permissions to make this work!');
+        return;
+      }
+
+      let mediaTypes: ImagePicker.MediaTypeOptions[] = [ImagePicker.MediaTypeOptions.Images, ImagePicker.MediaTypeOptions.Videos];
+      if (mediaType === 'images') {
+        mediaTypes = [ImagePicker.MediaTypeOptions.Images];
+      } else if (mediaType === 'videos') {
+        mediaTypes = [ImagePicker.MediaTypeOptions.Videos];
+      }
+
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: mediaTypes.length === 2 ? ImagePicker.MediaTypeOptions.All : mediaTypes[0],
+        allowsMultipleSelection: true,
+        quality: 0.8,
+        orderedSelection: true,
+      });
+
+      if (!result.canceled && result.assets) {
+        const newMedia: MediaFile[] = result.assets.map((asset, index) => ({
+          id: `${Date.now()}-${index}-${Math.random().toString(36).substr(2, 9)}`,
+          uri: asset.uri,
+          type: asset.type === 'video' ? 'video' : 'image',
+          name: asset.fileName || `media-${Date.now()}-${index}.${asset.type === 'video' ? 'mp4' : 'jpg'}`,
+          size: asset.fileSize || 0,
+          status: 'pending',
+          selected: true,
+          scheduleType: 'range',
+          caption: '',
+        }));
+        setSelectedMedia(prev => [...prev, ...newMedia]);
+      }
+    } catch (error) {
+      console.error('Error picking media:', error);
+      Alert.alert('Error', 'Failed to pick media');
     }
+  };
 
-    // Use array format for mediaTypes to fix the deprecation warning
-    let mediaTypes: ImagePicker.MediaTypeOptions[] = [ImagePicker.MediaTypeOptions.Images, ImagePicker.MediaTypeOptions.Videos];
-    if (mediaType === 'images') {
-      mediaTypes = [ImagePicker.MediaTypeOptions.Images];
-    } else if (mediaType === 'videos') {
-      mediaTypes = [ImagePicker.MediaTypeOptions.Videos];
-    }
-
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: mediaTypes.length === 2 ? ImagePicker.MediaTypeOptions.All : mediaTypes[0],
-      allowsMultipleSelection: true,
-      quality: 0.8,
-      orderedSelection: true,
-    });
-
-    if (!result.canceled && result.assets) {
-      const newMedia: MediaFile[] = await Promise.all(
-        result.assets.map(async (asset, index) => {
-          try {
-            const fileInfo = await FileSystem.getInfoAsync(asset.uri);
-            let fileSize = 0;
-            
-            if (fileInfo.exists && 'size' in fileInfo) {
-              fileSize = fileInfo.size || 0;
-            }
-
-            return {
-              id: `${Date.now()}-${index}`,
-              uri: asset.uri,
-              type: asset.type === 'video' ? 'video' : 'image',
-              name: asset.fileName || `media-${Date.now()}-${index}.${asset.type === 'video' ? 'mp4' : 'jpg'}`,
-              size: fileSize,
-              status: 'pending',
-              selected: true,
-              scheduleType: 'range',
-            };
-          } catch (error) {
-            console.error('Error getting file info:', error);
-            return {
-              id: `${Date.now()}-${index}`,
-              uri: asset.uri,
-              type: asset.type === 'video' ? 'video' : 'image',
-              name: asset.fileName || `media-${Date.now()}-${index}.${asset.type === 'video' ? 'mp4' : 'jpg'}`,
-              size: 0,
-              status: 'pending',
-              selected: true,
-              scheduleType: 'range',
-            };
-          }
-        })
-      );
-      setSelectedMedia(prev => [...prev, ...newMedia]);
-    }
-  } catch (error) {
-    console.error('Error picking media:', error);
-    Alert.alert('Error', 'Failed to pick media');
-  }
-};
-
+  // FIXED: Proper modal opening with console logs
   const openScheduleModal = (media: MediaFile) => {
+    console.log('✅ Opening schedule modal for:', media.name);
     setCurrentMediaForScheduling(media);
-    setSelectedScheduleType(media.scheduleType || 'range');
+    setSelectedScheduleType(media.scheduleType);
     
     if (media.scheduledDatetime) {
       const date = new Date(media.scheduledDatetime);
@@ -226,6 +193,15 @@ const UploadScreen: React.FC = () => {
     }
     
     setScheduleModalVisible(true);
+    console.log('✅ Schedule modal state set to true');
+  };
+
+  const openCaptionModal = (media: MediaFile) => {
+    console.log('✅ Opening caption modal for:', media.name);
+    setCurrentMediaForCaption(media);
+    setCaptionText(media.caption || '');
+    setCaptionModalVisible(true);
+    console.log('✅ Caption modal state set to true');
   };
 
   const saveScheduleSettings = () => {
@@ -250,6 +226,22 @@ const UploadScreen: React.FC = () => {
     setSelectedTime(null);
     setScheduledDateTime('');
     setCurrentMediaForScheduling(null);
+  };
+
+  const saveCaption = () => {
+    if (!currentMediaForCaption) return;
+
+    setSelectedMedia(prev =>
+      prev.map(media =>
+        media.id === currentMediaForCaption.id
+          ? { ...media, caption: captionText }
+          : media
+      )
+    );
+
+    setCaptionModalVisible(false);
+    setCurrentMediaForCaption(null);
+    setCaptionText('');
   };
 
   const toggleMediaSelection = (mediaId: string) => {
@@ -292,12 +284,10 @@ const UploadScreen: React.FC = () => {
     return selectedMedia.filter(media => media.selected);
   };
 
-  // Add cancel upload function
   const handleCancelUpload = () => {
     cancelUploadRef.current = true;
     setUploading(false);
     
-    // Reset media statuses
     setSelectedMedia(prev => 
       prev.map(media => 
         media.status === 'uploading' ? { ...media, status: 'pending' } : media
@@ -305,9 +295,6 @@ const UploadScreen: React.FC = () => {
     );
     
     setModalVisible(false);
-    console.log('📛 Upload cancelled by user');
-    
-    // Clear active uploads
     activeUploadsRef.current.clear();
   };
 
@@ -329,7 +316,6 @@ const UploadScreen: React.FC = () => {
       return;
     }
 
-    // Reset cancellation state
     cancelUploadRef.current = false;
     activeUploadsRef.current.clear();
     setUploading(true);
@@ -349,7 +335,6 @@ const UploadScreen: React.FC = () => {
 
     try {
       for (const batch of batches) {
-        // Check if upload was cancelled
         checkCancelled();
 
         const batchPromises = batch.map(media => 
@@ -370,12 +355,10 @@ const UploadScreen: React.FC = () => {
       }
 
       if (successfulUploads > 0 && failedUploads === 0) {
-        console.log(`✅ SUCCESS: All ${successfulUploads} files uploaded successfully!`);
         Alert.alert('Success', `All ${successfulUploads} files uploaded successfully to selected accounts!`);
         setSelectedMedia(prev => prev.filter(media => media.status !== 'completed'));
         if (getSelectedMedia().length === 0) setModalVisible(false);
       } else if (successfulUploads > 0) {
-        console.log(`⚠️ PARTIAL: ${successfulUploads} successful, ${failedUploads} failed`);
         Alert.alert(
           'Upload Complete',
           `${successfulUploads} files uploaded successfully, ${failedUploads} failed.`,
@@ -383,7 +366,6 @@ const UploadScreen: React.FC = () => {
         );
         setSelectedMedia(prev => prev.filter(media => media.status !== 'completed'));
       } else {
-        console.log(`❌ FAILED: All ${failedUploads} files failed to upload`);
         Alert.alert('Upload Failed', 'All files failed to upload. Please try again.');
       }
     } catch (error) {
@@ -401,10 +383,8 @@ const UploadScreen: React.FC = () => {
 
   const uploadMediaToAccounts = async (media: MediaFile, accountIds: string[]): Promise<{ success: boolean }> => {
     try {
-      // Check if already completed before starting
       const uploadKey = `${media.id}`;
       if (activeUploadsRef.current.has(uploadKey)) {
-        console.log(`[SKIP] File "${media.name}" is already being uploaded`);
         return { success: true };
       }
 
@@ -420,18 +400,16 @@ const UploadScreen: React.FC = () => {
       setSelectedMedia(prev =>
         prev.map(m => m.id === media.id ? { ...m, status: 'completed' } : m)
       );
-      console.log(`✅ File "${media.name}" uploaded successfully to all accounts`);
       return { success: true };
     } catch (error) {
       if (cancelUploadRef.current) {
-        console.log(`📛 Upload cancelled for "${media.name}"`);
         setSelectedMedia(prev =>
           prev.map(m => m.id === media.id ? { ...m, status: 'pending' } : m)
         );
         return { success: false };
       }
       
-      console.error(`❌ Upload failed for "${media.name}":`, error);
+      console.error(`Upload failed for "${media.name}":`, error);
       setSelectedMedia(prev =>
         prev.map(m => m.id === media.id ? { ...m, status: 'failed' } : m)
       );
@@ -446,39 +424,38 @@ const UploadScreen: React.FC = () => {
     try {
       checkCancelled();
 
-      // Check if this file was already successfully uploaded to THIS account
       const uploadKey = `${media.id}-${accountId}`;
       
       if (uploadProgress[uploadKey] === 100) {
-        console.log(`[SKIP] File "${media.name}" already uploaded to account ${accountId}, skipping`);
         return;
       }
 
       if (media.size > CHUNK_SIZE) {
-        console.log(`[CHUNKED] Using chunked upload for "${media.name}" (${formatFileSize(media.size)})`);
         await uploadInChunks(media, accountId);
       } else {
-        console.log(`[SINGLE] Using single upload for "${media.name}" (${formatFileSize(media.size)})`);
         await uploadSingleFile(media, accountId);
       }
       
-      // Mark this file-account combination as completed
       setUploadProgress(prev => ({
         ...prev,
         [uploadKey]: 100
       }));
       
-      console.log(`[SUCCESS] Successfully uploaded "${media.name}" to account ${accountId}`);
-    } catch (error) {
-      // Check if upload was cancelled
+    } catch (error: any) {
       checkCancelled();
 
+      if (error.response?.status === 400 && error.response?.data?.error?.includes('duplicate')) {
+        setUploadProgress(prev => ({
+          ...prev,
+          [`${media.id}-${accountId}`]: 100
+        }));
+        return;
+      }
+
       if (retryCount < MAX_RETRIES) {
-        console.log(`[RETRY] Retrying upload for "${media.name}" (attempt ${retryCount + 1}/${MAX_RETRIES})`);
         await new Promise(resolve => setTimeout(resolve, 2000 * (retryCount + 1)));
         return uploadMediaWithRetry(media, accountId, retryCount + 1);
       } else {
-        console.log(`[ERROR] All retries failed for "${media.name}":`, error);
         throw error;
       }
     }
@@ -497,36 +474,21 @@ const UploadScreen: React.FC = () => {
     formData.append('platform', platform);
     formData.append('user_id', user.Id.toString());
     
-    formData.append('schedule_type', media.scheduleType || 'range');
+    formData.append('schedule_type', media.scheduleType);
     if (media.scheduleType === 'datetime' && media.scheduledDatetime) {
       formData.append('scheduled_datetime', media.scheduledDatetime);
     }
+    
+    if (media.caption) {
+      formData.append('caption', media.caption);
+    }
 
     try {
-      const response = await ApiService.uploadMedia(formData) as UploadResponse;
-      
-      // Type-safe success detection
-      const isSuccess = 
-        (response as any).success === true || 
-        (response.message && (response.message.includes('success') || response.message.includes('queued'))) || 
-        response.file_id || 
-        (response as any).drive_link;
-      
-      if (!isSuccess) {
-        throw new Error(response.error || 'Upload failed without specific error');
-      }
-      
-      console.log(`[API RESPONSE] Upload successful for "${media.name}":`, response);
-      
+      await ApiService.uploadMedia(formData);
     } catch (error: any) {
-      console.error(`[API ERROR] Upload failed for "${media.name}":`, error);
-      
-      // Check if this is actually a successful upload with misleading error
-      if (error.message?.includes('success') || (error.response?.data as any)?.file_id) {
-        console.log(`[SUCCESS DETECTED] Upload was actually successful for "${media.name}"`);
-        return; // Treat as success
+      if (error.response?.status === 400 && error.response?.data?.error?.includes('duplicate')) {
+        return;
       }
-      
       throw error;
     }
   };
@@ -539,8 +501,6 @@ const UploadScreen: React.FC = () => {
 
     const totalChunks = Math.ceil(media.size / CHUNK_SIZE);
     let uploadId = `${media.id}-${Date.now()}`;
-
-    console.log(`[START] Starting chunked upload for "${media.name}": ${totalChunks} chunks`);
 
     for (let chunkIndex = 0; chunkIndex < totalChunks; chunkIndex++) {
       checkCancelled();
@@ -568,18 +528,17 @@ const UploadScreen: React.FC = () => {
       chunkFormData.append('upload_id', uploadId);
       chunkFormData.append('original_name', media.name);
       
-      chunkFormData.append('schedule_type', media.scheduleType || 'range');
+      chunkFormData.append('schedule_type', media.scheduleType);
       if (media.scheduleType === 'datetime' && media.scheduledDatetime) {
         chunkFormData.append('scheduled_datetime', media.scheduledDatetime);
       }
+      
+      if (chunkIndex === 0 && media.caption) {
+        chunkFormData.append('caption', media.caption);
+      }
 
       try {
-        const response = await ApiService.uploadMediaChunk(chunkFormData) as UploadResponse;
-        
-        // Check if chunk upload was successful
-        if (!(response as any).success && !response.message?.includes('success')) {
-          throw new Error(response.error || 'Chunk upload failed');
-        }
+        await ApiService.uploadMediaChunk(chunkFormData);
         
         setChunkProgress(prev => ({
           ...prev,
@@ -592,10 +551,7 @@ const UploadScreen: React.FC = () => {
           [media.id]: Math.min(prev[media.id] || 0, chunkProgressValue)
         }));
 
-        console.log(`[CHUNK] Chunk ${chunkIndex + 1}/${totalChunks} uploaded for "${media.name}"`);
-
       } catch (error) {
-        console.log(`[ERROR] Chunk ${chunkIndex} upload failed for "${media.name}":`, error);
         throw error;
       }
     }
@@ -610,22 +566,18 @@ const UploadScreen: React.FC = () => {
     finalizeFormData.append('original_name', media.name);
     finalizeFormData.append('total_chunks', totalChunks.toString());
     
-    finalizeFormData.append('schedule_type', media.scheduleType || 'range');
+    finalizeFormData.append('schedule_type', media.scheduleType);
     if (media.scheduleType === 'datetime' && media.scheduledDatetime) {
       finalizeFormData.append('scheduled_datetime', media.scheduledDatetime);
     }
+    
+    if (media.caption) {
+      finalizeFormData.append('caption', media.caption);
+    }
 
     try {
-      const response = await ApiService.finalizeUpload(finalizeFormData) as UploadResponse;
-      
-      // Check if finalization was successful
-      if (!(response as any).success && !response.message?.includes('started')) {
-        throw new Error(response.error || 'Upload finalization failed');
-      }
-      
-      console.log(`[FINAL] All chunks finalized for "${media.name}"`);
+      await ApiService.finalizeUpload(finalizeFormData);
     } catch (error) {
-      console.log(`[FINAL ERROR] Finalization failed for "${media.name}":`, error);
       throw error;
     }
   };
@@ -655,158 +607,153 @@ const UploadScreen: React.FC = () => {
     });
   };
 
-
-
-
-
-
-
-
-
-
-
-
-
-
   const MediaItem = ({ item }: { item: MediaFile }) => {
-  const currentChunkProgress = chunkProgress[item.id];
-  
-  const getStatusDisplay = () => {
-    switch (item.status) {
-      case 'completed': 
-        return { text: 'Completed', color: '#34C759', icon: '✓' };
-      case 'uploading': 
-        return { text: 'Uploading', color: '#007AFF', icon: '↻' };
-      case 'failed': 
-        return { text: 'Failed', color: '#FF3B30', icon: '✗' };
-      default: 
-        return { text: 'Pending', color: '#8E8E93', icon: '…' };
-    }
-  };
+    const currentChunkProgress = chunkProgress[item.id];
+    
+    const getStatusDisplay = () => {
+      switch (item.status) {
+        case 'completed': 
+          return { text: 'Completed', color: '#34C759', icon: '✓' };
+        case 'uploading': 
+          return { text: 'Uploading', color: '#007AFF', icon: '↻' };
+        case 'failed': 
+          return { text: 'Failed', color: '#FF3B30', icon: '✗' };
+        default: 
+          return { text: 'Pending', color: '#8E8E93', icon: '…' };
+      }
+    };
 
-  const status = getStatusDisplay();
-  
-  // Helper function to safely render schedule text
-  const renderScheduleText = () => {
-    if (item.scheduleType === 'datetime' && item.scheduledDatetime) {
-      return `📅 ${new Date(item.scheduledDatetime).toLocaleString()}`;
-    } else if (item.scheduleType === 'datetime') {
-      return '📅 Set Date/Time';
-    } else {
-      return '⏰ Range Schedule';
-    }
-  };
+    const status = getStatusDisplay();
+    
+    const renderScheduleText = () => {
+      if (item.scheduleType === 'datetime' && item.scheduledDatetime) {
+        return `📅 ${new Date(item.scheduledDatetime).toLocaleString()}`;
+      } else {
+        return '⏰ Range Schedule';
+      }
+    };
 
-  return (
-    <TouchableOpacity
-      style={[
+    const renderCaptionPreview = () => {
+      if (item.caption) {
+        const preview = item.caption.length > 30 ? `${item.caption.substring(0, 30)}...` : item.caption;
+        return `💬 ${preview}`;
+      } else {
+        return '💬 Add Caption';
+      }
+    };
+
+    return (
+      <View style={[
         styles.mediaItem,
         item.selected && styles.mediaItemSelected,
-      ]}
-      onPress={() => toggleMediaSelection(item.id)}
-      onLongPress={() => removeMedia(item.id)}
-    >
-      {/* Checkbox */}
-      <View style={styles.checkboxContainer}>
-        <View style={[
-          styles.checkbox,
-          item.selected && styles.checkboxSelected,
-        ]}>
-          {item.selected && (
-            <View style={styles.checkboxTick}>
-              <Text style={styles.checkboxTickText}>✓</Text>
+      ]}>
+        {/* Checkbox */}
+        <TouchableOpacity 
+          style={styles.checkboxContainer}
+          onPress={() => toggleMediaSelection(item.id)}
+        >
+          <View style={[
+            styles.checkbox,
+            item.selected && styles.checkboxSelected,
+          ]}>
+            {item.selected && (
+              <View style={styles.checkboxTick}>
+                <Text style={styles.checkboxTickText}>✓</Text>
+              </View>
+            )}
+          </View>
+        </TouchableOpacity>
+
+        {/* Media Preview */}
+        <View style={styles.mediaPreview}>
+          {item.type === 'image' ? (
+            <Image source={{ uri: item.uri }} style={styles.mediaThumbnail} />
+          ) : (
+            <View style={[styles.mediaThumbnail, styles.videoThumbnail]}>
+              <Text style={styles.videoIcon}>▶</Text>
             </View>
           )}
         </View>
-      </View>
 
-      {/* Media Preview */}
-      <View style={styles.mediaPreview}>
-        {item.type === 'image' ? (
-          <Image source={{ uri: item.uri }} style={styles.mediaThumbnail} />
-        ) : (
-          <View style={[styles.mediaThumbnail, styles.videoThumbnail]}>
-            <Text style={styles.videoIcon}>▶</Text>
-          </View>
-        )}
-      </View>
-
-      {/* Media Info */}
-      <View style={styles.mediaInfo}>
-        {/* File Name */}
-        <Text style={styles.mediaName} numberOfLines={1}>
-          {item.name || 'Unknown File'}
-        </Text>
-        
-        {/* File Size */}
-        <Text style={styles.fileSize}>
-          {formatFileSize(item.size)}
-        </Text>
-        
-        {/* Schedule Info */}
-        <View style={styles.scheduleInfo}>
+        {/* Media Info */}
+        <View style={styles.mediaInfo}>
+          <Text style={styles.mediaName} numberOfLines={1}>
+            {item.name || 'Unknown File'}
+          </Text>
+          
+          <Text style={styles.fileSize}>
+            {formatFileSize(item.size)}
+          </Text>
+          
+          {/* FIXED: Schedule Button with proper touch handling */}
           <TouchableOpacity 
             style={styles.scheduleButton}
             onPress={() => openScheduleModal(item)}
+            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
           >
             <Text style={styles.scheduleButtonText}>
               {renderScheduleText()}
             </Text>
           </TouchableOpacity>
-        </View>
-        
-        {/* Status Container */}
-        <View style={styles.statusContainer}>
-          <View style={styles.statusWithIcon}>
-            <Text style={styles.statusIcon}>
-              {status.icon}
+          
+          {/* FIXED: Caption Button with proper touch handling */}
+          <TouchableOpacity 
+            style={styles.captionButton}
+            onPress={() => openCaptionModal(item)}
+            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+          >
+            <Text style={styles.captionButtonText}>
+              {renderCaptionPreview()}
             </Text>
-            <Text style={[styles.statusText, { color: status.color }]}>
-              {status.text}
-            </Text>
+          </TouchableOpacity>
+          
+          {/* Status Container */}
+          <View style={styles.statusContainer}>
+            <View style={styles.statusWithIcon}>
+              <Text style={styles.statusIcon}>
+                {status.icon}
+              </Text>
+              <Text style={[styles.statusText, { color: status.color }]}>
+                {status.text}
+              </Text>
+            </View>
+            
+            {item.status === 'uploading' && uploadProgress[item.id] !== undefined && (
+              <Text style={styles.progressText}>
+                {Math.round(uploadProgress[item.id])}%
+              </Text>
+            )}
           </View>
           
-          {/* Progress Percentage */}
-          {item.status === 'uploading' && uploadProgress[item.id] !== undefined && (
-            <Text style={styles.progressText}>
-              {Math.round(uploadProgress[item.id])}%
+          {currentChunkProgress && (
+            <Text style={styles.chunkProgressText}>
+              Chunk: {currentChunkProgress.uploaded}/{currentChunkProgress.total}
             </Text>
           )}
+          
+          {item.status === 'uploading' && (
+            <View style={styles.progressBar}>
+              <View 
+                style={[
+                  styles.progressFill, 
+                  { width: `${uploadProgress[item.id] || 0}%` }
+                ]} 
+              />
+            </View>
+          )}
         </View>
-        
-        {/* Chunk Progress */}
-        {currentChunkProgress && (
-          <Text style={styles.chunkProgressText}>
-            Chunk: {currentChunkProgress.uploaded}/{currentChunkProgress.total}
-          </Text>
-        )}
-        
-        {/* Progress Bar */}
-        {item.status === 'uploading' && (
-          <View style={styles.progressBar}>
-            <View 
-              style={[
-                styles.progressFill, 
-                { width: `${uploadProgress[item.id] || 0}%` }
-              ]} 
-            />
-          </View>
-        )}
-      </View>
 
-      {/* Remove Button */}
-      <TouchableOpacity
-        style={styles.removeMediaButton}
-        onPress={() => removeMedia(item.id)}
-        disabled={item.status === 'uploading'}
-      >
-        <View style={styles.removeMediaButtonInner}>
+        {/* Remove Button */}
+        <TouchableOpacity
+          style={styles.removeMediaButton}
+          onPress={() => removeMedia(item.id)}
+          disabled={item.status === 'uploading'}
+        >
           <Text style={styles.removeMediaText}>×</Text>
-        </View>
-      </TouchableOpacity>
-    </TouchableOpacity>
-  );
-};
+        </TouchableOpacity>
+      </View>
+    );
+  };
 
   const formatFileSize = (bytes: number): string => {
     if (bytes === 0) return '0 B';
@@ -991,10 +938,6 @@ const UploadScreen: React.FC = () => {
                   renderItem={MediaItem}
                   keyExtractor={item => item.id}
                   style={styles.mediaList}
-                  contentContainerStyle={styles.mediaListContent}
-                  initialNumToRender={10}
-                  maxToRenderPerBatch={10}
-                  windowSize={5}
                 />
               </View>
             ) : (
@@ -1030,7 +973,6 @@ const UploadScreen: React.FC = () => {
               <TouchableOpacity
                 style={styles.cancelButton}
                 onPress={uploading ? handleCancelUpload : () => setModalVisible(false)}
-                disabled={false}
               >
                 <Text style={styles.cancelButtonText}>
                   {uploading ? 'Cancel Upload' : 'Close'}
@@ -1060,7 +1002,7 @@ const UploadScreen: React.FC = () => {
         </View>
       </Modal>
 
-      {/* Schedule Settings Modal */}
+      {/* Schedule Settings Modal - FIXED for iOS */}
       <Modal
         animationType="slide"
         transparent={true}
@@ -1133,66 +1075,64 @@ const UploadScreen: React.FC = () => {
                     style={styles.pickerButton}
                     onPress={() => setShowTimePicker(true)}
                   >
-<Text style={styles.pickerButtonText}>
-  {selectedTime ? 
-    selectedTime.toLocaleTimeString([], { 
-      hour: '2-digit', 
-      minute: '2-digit',
-      hour12: true 
-    }) 
-    : 'Select Time'
-  }
-</Text>
+                    <Text style={styles.pickerButtonText}>
+                      {selectedTime ? 
+                        selectedTime.toLocaleTimeString([], { 
+                          hour: '2-digit', 
+                          minute: '2-digit',
+                          hour12: true 
+                        }) 
+                        : 'Select Time'
+                      }
+                    </Text>
                   </TouchableOpacity>
                 </View>
 
                 {scheduledDateTime && (
-  <View style={styles.selectedDateTimeContainer}>
-    <Text style={styles.selectedDateTimeLabel}>Scheduled for:</Text>
-    <Text style={styles.selectedDateTimeText}>
-      {new Date(scheduledDateTime).toLocaleString()}
-    </Text>
-  </View>
-)}
+                  <View style={styles.selectedDateTimeContainer}>
+                    <Text style={styles.selectedDateTimeLabel}>Scheduled for:</Text>
+                    <Text style={styles.selectedDateTimeText}>
+                      {new Date(scheduledDateTime).toLocaleString()}
+                    </Text>
+                  </View>
+                )}
 
                 {showDatePicker && (
-  <DateTimePicker
-    value={selectedDate || new Date()}
-    mode="date"
-    display={Platform.OS === 'ios' ? 'spinner' : 'default'}
-    onChange={(event, date) => {
-      setShowDatePicker(false);
-      if (date) {
-        // Create a new date to avoid timezone issues
-        const newDate = new Date(date);
-        newDate.setHours(selectedTime ? selectedTime.getHours() : 0);
-        newDate.setMinutes(selectedTime ? selectedTime.getMinutes() : 0);
-        setSelectedDate(newDate);
-        updateScheduledDateTime(newDate, selectedTime);
-      }
-    }}
-    minimumDate={new Date()}
-  />
-)}
+                  <DateTimePicker
+                    value={selectedDate || new Date()}
+                    mode="date"
+                    display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+                    onChange={(event, date) => {
+                      setShowDatePicker(false);
+                      if (date) {
+                        const newDate = new Date(date);
+                        newDate.setHours(selectedTime ? selectedTime.getHours() : 0);
+                        newDate.setMinutes(selectedTime ? selectedTime.getMinutes() : 0);
+                        setSelectedDate(newDate);
+                        updateScheduledDateTime(newDate, selectedTime);
+                      }
+                    }}
+                    minimumDate={new Date()}
+                  />
+                )}
                 {showTimePicker && (
-  <DateTimePicker
-    value={selectedTime || new Date()}
-    mode="time"
-    display={Platform.OS === 'ios' ? 'spinner' : 'default'}
-    onChange={(event, time) => {
-      setShowTimePicker(false);
-      if (time) {
-        // Create a new date with the selected time to avoid timezone issues
-        const newTime = new Date();
-        newTime.setHours(time.getHours());
-        newTime.setMinutes(time.getMinutes());
-        newTime.setSeconds(0);
-        setSelectedTime(newTime);
-        updateScheduledDateTime(selectedDate, newTime);
-      }
-    }}
-  />
-)}
+                  <DateTimePicker
+                    value={selectedTime || new Date()}
+                    mode="time"
+                    display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+                    onChange={(event, time) => {
+                      setShowTimePicker(false);
+                      if (time) {
+                        const newTime = new Date();
+                        newTime.setHours(time.getHours());
+                        newTime.setMinutes(time.getMinutes());
+                        newTime.setSeconds(0);
+                        setSelectedTime(newTime);
+                        updateScheduledDateTime(selectedDate, newTime);
+                      }
+                    }}
+                  />
+                )}
               </View>
             )}
 
@@ -1221,13 +1161,63 @@ const UploadScreen: React.FC = () => {
               <TouchableOpacity
                 style={styles.scheduleSaveButton}
                 onPress={saveScheduleSettings}
-                disabled={selectedScheduleType === 'datetime' && !scheduledDateTime}
               >
-                <Text style={[
-                  styles.scheduleSaveButtonText,
-                  selectedScheduleType === 'datetime' && !scheduledDateTime && styles.scheduleSaveButtonTextDisabled
-                ]}>
+                <Text style={styles.scheduleSaveButtonText}>
                   Save Schedule
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Caption Modal - FIXED for iOS */}
+      <Modal
+        animationType="slide"
+        transparent={true}
+        visible={captionModalVisible}
+        onRequestClose={() => setCaptionModalVisible(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.captionModalContent}>
+            <Text style={styles.captionModalTitle}>Add Caption</Text>
+            {currentMediaForCaption && (
+              <Text style={styles.captionMediaName}>{currentMediaForCaption.name}</Text>
+            )}
+            
+            <View style={styles.captionInputContainer}>
+              <Text style={styles.captionLabel}>Caption:</Text>
+              <TextInput
+                style={styles.captionInput}
+                value={captionText}
+                onChangeText={setCaptionText}
+                placeholder="Enter caption for this post..."
+                multiline
+                numberOfLines={4}
+                maxLength={500}
+              />
+              <Text style={styles.captionCounter}>
+                {captionText.length}/500 characters
+              </Text>
+            </View>
+
+            <View style={styles.captionModalActions}>
+              <TouchableOpacity
+                style={styles.captionCancelButton}
+                onPress={() => {
+                  setCaptionModalVisible(false);
+                  setCurrentMediaForCaption(null);
+                  setCaptionText('');
+                }}
+              >
+                <Text style={styles.captionCancelButtonText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.captionSaveButton}
+                onPress={saveCaption}
+              >
+                <Text style={styles.captionSaveButtonText}>
+                  Save Caption
                 </Text>
               </TouchableOpacity>
             </View>
@@ -1345,6 +1335,9 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: 'bold',
   },
+  checkboxContainer: {
+    marginRight: 10,
+  },
   uploadSection: {
     marginBottom: 20,
   },
@@ -1414,8 +1407,9 @@ const styles = StyleSheet.create({
     color: '#856404',
     fontWeight: '500',
   },
-  modalOverlay: {
-    flex: 1,
+  // Key fix applied here: flex: 1 ensures it covers the whole screen.
+  modalOverlay: { 
+    flex: 1, 
     backgroundColor: 'rgba(0, 0, 0, 0.5)',
     justifyContent: 'center',
     alignItems: 'center',
@@ -1475,15 +1469,12 @@ const styles = StyleSheet.create({
     marginBottom: 20,
   },
   mediaList: {
-    maxHeight: 200,
-  },
-  mediaListContent: {
-    paddingBottom: 10,
+    maxHeight: 300,
   },
   mediaItem: {
     flexDirection: 'row',
     backgroundColor: '#f8f8f8',
-    padding: 10,
+    padding: 12,
     borderRadius: 8,
     marginBottom: 8,
     alignItems: 'center',
@@ -1492,9 +1483,6 @@ const styles = StyleSheet.create({
     backgroundColor: '#e8f4fd',
     borderColor: '#007AFF',
     borderWidth: 1,
-  },
-  checkboxContainer: {
-    marginRight: 10,
   },
   mediaPreview: {
     marginRight: 12,
@@ -1526,21 +1514,34 @@ const styles = StyleSheet.create({
   fileSize: {
     fontSize: 12,
     color: '#666',
-    marginBottom: 4,
-  },
-  scheduleInfo: {
-    marginBottom: 4,
+    marginBottom: 6,
   },
   scheduleButton: {
     backgroundColor: '#f0f0f0',
     paddingHorizontal: 8,
-    paddingVertical: 4,
+    paddingVertical: 6,
     borderRadius: 4,
+    marginBottom: 4,
     alignSelf: 'flex-start',
   },
   scheduleButtonText: {
     fontSize: 11,
     color: '#666',
+    fontWeight: '500',
+  },
+  captionButton: {
+    backgroundColor: '#f0f8ff',
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+    borderRadius: 4,
+    marginBottom: 6,
+    alignSelf: 'flex-start',
+    borderWidth: 1,
+    borderColor: '#007AFF',
+  },
+  captionButtonText: {
+    fontSize: 11,
+    color: '#007AFF',
     fontWeight: '500',
   },
   statusContainer: {
@@ -1584,12 +1585,6 @@ const styles = StyleSheet.create({
   },
   removeMediaButton: {
     padding: 4,
-  },
-  removeMediaButtonInner: {
-    width: 24,
-    height: 24,
-    justifyContent: 'center',
-    alignItems: 'center',
   },
   removeMediaText: {
     color: '#FF3B30',
@@ -1677,7 +1672,7 @@ const styles = StyleSheet.create({
     borderRadius: 15,
     padding: 20,
     width: '90%',
-    maxHeight: '60%',
+    maxHeight: '80%',
   },
   scheduleModalTitle: {
     fontSize: 20,
@@ -1814,8 +1809,83 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
   },
-  scheduleSaveButtonTextDisabled: {
-    opacity: 0.5,
+
+  // Caption Modal Styles
+  captionModalContent: {
+    backgroundColor: '#fff',
+    borderRadius: 15,
+    padding: 20,
+    width: '90%',
+    maxHeight: '60%',
+  },
+  captionModalTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#333',
+    textAlign: 'center',
+    marginBottom: 10,
+  },
+  captionMediaName: {
+    fontSize: 14,
+    color: '#666',
+    textAlign: 'center',
+    marginBottom: 20,
+    fontStyle: 'italic',
+  },
+  captionInputContainer: {
+    marginBottom: 20,
+  },
+  captionLabel: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#333',
+    marginBottom: 8,
+  },
+  captionInput: {
+    borderWidth: 1,
+    borderColor: '#ddd',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    fontSize: 14,
+    backgroundColor: '#fff',
+    minHeight: 100,
+    textAlignVertical: 'top',
+  },
+  captionCounter: {
+    fontSize: 12,
+    color: '#666',
+    textAlign: 'right',
+    marginTop: 4,
+  },
+  captionModalActions: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  captionCancelButton: {
+    flex: 1,
+    padding: 15,
+    borderRadius: 8,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#ddd',
+  },
+  captionCancelButtonText: {
+    fontSize: 16,
+    color: '#666',
+    fontWeight: '500',
+  },
+  captionSaveButton: {
+    flex: 1,
+    backgroundColor: '#007AFF',
+    padding: 15,
+    borderRadius: 8,
+    alignItems: 'center',
+  },
+  captionSaveButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
   },
 });
 

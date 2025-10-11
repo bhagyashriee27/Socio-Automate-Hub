@@ -314,17 +314,31 @@ export class ApiService {
 
   // Upload Media
   static async uploadMedia(formData: FormData): Promise<ApiResponse> {
-    try {
-      const response: AxiosResponse<ApiResponse> = await api.post('/upload-media', formData, {
-        headers: {
-          'Content-Type': 'multipart/form-data',
-        },
-      });
-      return response.data;
-    } catch (error: any) {
-      throw new Error(error.response?.data?.error || 'Failed to upload media');
+  try {
+    const response: AxiosResponse<ApiResponse> = await api.post('/upload-media', formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data',
+      },
+    });
+    
+    // Handle duplicate file response
+    if ((response.data as any).duplicate) {
+      console.log('File already exists in Drive, scheduling updated');
     }
+    
+    return response.data;
+  } catch (error: any) {
+    // If it's a duplicate file error, treat as success
+    if (error.response?.status === 400 && error.response?.data?.error?.includes('duplicate')) {
+      return {
+        message: 'File already exists, scheduling updated',
+        success: true,
+        duplicate: true
+      } as any;
+    }
+    throw new Error(error.response?.data?.error || 'Failed to upload media');
   }
+}
 
   // Forgot Password
   static async sendPasswordResetOtp(email: string, phoneNumber: string): Promise<ApiResponse> {
@@ -379,31 +393,31 @@ export class ApiService {
   }
 
   static async uploadMediaChunk(formData: FormData): Promise<ApiResponse> {
-    try {
-      const response: AxiosResponse<ApiResponse> = await api.post('/upload-media-chunk', formData, {
-        headers: {
-          'Content-Type': 'multipart/form-data',
-        },
-        timeout: 60000, // 60 seconds for chunks
-      });
-      return response.data;
-    } catch (error: any) {
-      throw new Error(error.response?.data?.error || 'Chunk upload failed');
-    }
+  try {
+    const response: AxiosResponse<ApiResponse> = await api.post('/upload-media-chunk', formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data',
+      },
+      timeout: 60000,
+    });
+    return response.data;
+  } catch (error: any) {
+    throw new Error(error.response?.data?.error || 'Chunk upload failed');
   }
+}
 
   static async finalizeUpload(formData: FormData): Promise<ApiResponse> {
-    try {
-      const response: AxiosResponse<ApiResponse> = await api.post('/finalize-upload', formData, {
-        headers: {
-          'Content-Type': 'multipart/form-data',
-        },
-      });
-      return response.data;
-    } catch (error: any) {
-      throw new Error(error.response?.data?.error || 'Upload finalization failed');
-    }
+  try {
+    const response: AxiosResponse<ApiResponse> = await api.post('/finalize-upload', formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data',
+      },
+    });
+    return response.data;
+  } catch (error: any) {
+    throw new Error(error.response?.data?.error || 'Upload finalization failed');
   }
+}
 
   static async getUploadStatus(uploadId: string): Promise<any> {
     try {

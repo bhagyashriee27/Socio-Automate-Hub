@@ -997,7 +997,7 @@ def update_media_schedule():
 
 @app.route('/upload-media-chunk', methods=['POST'])
 def upload_media_chunk():
-    """Handle chunked file uploads."""
+    """Handle chunked file uploads with caption support."""
     try:
         chunk_file = request.files.get('chunk')
         account_id = request.form.get('account_id')
@@ -1007,6 +1007,9 @@ def upload_media_chunk():
         total_chunks = int(request.form.get('total_chunks', 1))
         upload_id = request.form.get('upload_id')
         original_name = request.form.get('original_name')
+        
+        # Extract caption from first chunk only to avoid duplication
+        caption = request.form.get('caption', '') if chunk_index == 0 else ''
 
         if not all([chunk_file, account_id, platform, user_id, upload_id, original_name]):
             return jsonify({"error": "Missing required parameters"}), 400
@@ -1024,15 +1027,22 @@ def upload_media_chunk():
             upload_chunks[upload_id] = []
         upload_chunks[upload_id].append(chunk_index)
 
-        # Update status
-        upload_status[upload_id] = {
-            'uploaded_chunks': len(upload_chunks[upload_id]),
-            'total_chunks': total_chunks,
-            'account_id': account_id,
-            'platform': platform,
-            'user_id': user_id,
-            'original_name': original_name
-        }
+        # Update status with caption (store only from first chunk)
+        if upload_id not in upload_status:
+            upload_status[upload_id] = {
+                'uploaded_chunks': len(upload_chunks[upload_id]),
+                'total_chunks': total_chunks,
+                'account_id': account_id,
+                'platform': platform,
+                'user_id': user_id,
+                'original_name': original_name,
+                'caption': caption if chunk_index == 0 else ''
+            }
+        else:
+            upload_status[upload_id]['uploaded_chunks'] = len(upload_chunks[upload_id])
+            # Only update caption if it's the first chunk and we don't have one yet
+            if chunk_index == 0 and caption and not upload_status[upload_id].get('caption'):
+                upload_status[upload_id]['caption'] = caption
 
         return jsonify({
             "message": f"Chunk {chunk_index + 1}/{total_chunks} uploaded successfully",
@@ -1050,7 +1060,7 @@ def upload_media_chunk():
 
 @app.route('/finalize-upload', methods=['POST'])
 def finalize_upload():
-    """Combine chunks and upload to Google Drive with scheduling support."""
+    """Combine chunks and upload to Google Drive with scheduling and caption support."""
     try:
         upload_id = request.form.get('upload_id')
         account_id = request.form.get('account_id')
@@ -1062,6 +1072,11 @@ def finalize_upload():
         # Get scheduling data from form
         schedule_type = request.form.get('schedule_type', 'range')
         scheduled_datetime = request.form.get('scheduled_datetime')
+        
+        # Get caption from form data or from stored upload status
+        caption = request.form.get('caption', '')
+        if not caption and upload_id in upload_status:
+            caption = upload_status[upload_id].get('caption', '')
 
         if not all([upload_id, account_id, platform, user_id, original_name]):
             return jsonify({"error": "Missing required parameters"}), 400
@@ -1073,10 +1088,10 @@ def finalize_upload():
                 "error": f"Incomplete upload: {len(uploaded_chunks)}/{total_chunks} chunks received"
             }), 400
 
-        # Combine chunks in a background thread with scheduling data
+        # Combine chunks in a background thread with scheduling data and caption
         thread = threading.Thread(
             target=combine_and_upload_chunks,
-            args=(upload_id, account_id, platform, user_id, original_name, total_chunks, schedule_type, scheduled_datetime)
+            args=(upload_id, account_id, platform, user_id, original_name, total_chunks, schedule_type, scheduled_datetime, caption)
         )
         thread.daemon = True
         thread.start()
@@ -1085,6 +1100,7 @@ def finalize_upload():
             "message": "Upload finalization started",
             "upload_id": upload_id,
             "status": "processing",
+            "caption": caption,  # Return caption in response
             "success": True
         }), 200
 
@@ -1210,10 +1226,11 @@ def get_custom_schedule(platform, record_id):
 
 # Add this function after the helper functions section, before the API endpoints
 def process_upload_with_scheduling(platform, account_id, media_data):
-    """Process upload and update custom schedule data for both range and datetime scheduling."""
+    """Process upload and update custom schedule data for both range and datetime scheduling with caption support."""
     try:
         schedule_type = media_data.get('schedule_type', 'range')
         scheduled_datetime = media_data.get('scheduled_datetime')
+        caption = media_data.get('caption', '')  # EXTRACT CAPTION FROM MEDIA_DATA
         
         # Always process scheduling data, regardless of schedule type
         conn = get_db_connection()
@@ -1244,23 +1261,25 @@ def process_upload_with_scheduling(platform, account_id, media_data):
                     break
             
             if existing_entry:
-                # Update existing entry with new file_id if needed
+                # Update existing entry with new file_id and caption if needed
                 existing_entry['file_id'] = media_data.get('file_id', existing_entry.get('file_id', ''))
                 existing_entry['upload_time'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-                print(f"✅ Updated existing schedule entry for {media_data.get('original_name')}")
+                existing_entry['caption'] = caption  # UPDATE CAPTION IN EXISTING ENTRY
+                print(f"✅ Updated existing schedule entry for {media_data.get('original_name')} with caption: {caption}")
             else:
-                # Add new schedule item
+                # Add new schedule item WITH CAPTION
                 new_schedule_item = {
                     'media_name': media_data.get('original_name', 'unknown'),
                     'scheduled_datetime': scheduled_datetime if schedule_type == 'datetime' else None,
                     'file_id': media_data.get('file_id', ''),
                     'status': 'pending',
                     'upload_time': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-                    'schedule_type': schedule_type
+                    'schedule_type': schedule_type,
+                    'caption': caption  # ADD CAPTION FIELD HERE
                 }
                 
                 current_schedule_data.append(new_schedule_item)
-                print(f"✅ Added {schedule_type} schedule for {media_data.get('original_name')}")
+                print(f"✅ Added {schedule_type} schedule for {media_data.get('original_name')} with caption: {caption}")
             
             # Update database
             updated_schedule_json = json.dumps(current_schedule_data)
@@ -1291,10 +1310,9 @@ def process_upload_with_scheduling(platform, account_id, media_data):
 
 
 
-
 # Find the combine_and_upload_chunks function and UPDATE it:
-def combine_and_upload_chunks(upload_id, account_id, platform, user_id, original_name, total_chunks, schedule_type='range', scheduled_datetime=None):
-    """Combine chunks and upload to Google Drive in background with scheduling support."""
+def combine_and_upload_chunks(upload_id, account_id, platform, user_id, original_name, total_chunks, schedule_type='range', scheduled_datetime=None, caption=''):
+    """Combine chunks and upload to Google Drive in background with scheduling and caption support."""
     try:
         upload_dir = f"temp_uploads/{upload_id}"
         combined_path = f"temp_uploads/{upload_id}_combined_{original_name}"
@@ -1376,24 +1394,28 @@ def combine_and_upload_chunks(upload_id, account_id, platform, user_id, original
 
                     media.stream().close() if hasattr(media, 'stream') else None
 
-                    # PROCESS SCHEDULING DATA AFTER SUCCESSFUL UPLOAD
+                    # PROCESS SCHEDULING DATA WITH CAPTION AFTER SUCCESSFUL UPLOAD
                     schedule_data = {
                         'schedule_type': schedule_type,
                         'scheduled_datetime': scheduled_datetime,
                         'original_name': original_name,
-                        'file_id': uploaded_file['id']
+                        'file_id': uploaded_file['id'],
+                        'caption': caption  # INCLUDE CAPTION
                     }
                     process_upload_with_scheduling(platform, account_id, schedule_data)
 
                     upload_status[upload_id]['status'] = 'completed'
                     upload_status[upload_id]['file_id'] = uploaded_file['id']
                     upload_status[upload_id]['drive_link'] = uploaded_file.get('webViewLink', '')
+                    upload_status[upload_id]['caption'] = caption  # STORE CAPTION IN STATUS
                 else:
                     upload_status[upload_id]['status'] = 'completed'
                     upload_status[upload_id]['message'] = 'File processed (no Drive token)'
+                    upload_status[upload_id]['caption'] = caption  # STORE CAPTION IN STATUS
             else:
                 upload_status[upload_id]['status'] = 'completed'
                 upload_status[upload_id]['message'] = 'File processed (no Drive configured)'
+                upload_status[upload_id]['caption'] = caption  # STORE CAPTION IN STATUS
 
         except Exception as e:
             upload_status[upload_id]['status'] = 'failed'
@@ -1428,10 +1450,9 @@ def get_upload_status(upload_id):
 
 
 # Find the existing upload-media endpoint and UPDATE it:
-
 @app.route('/upload-media', methods=['POST'])
 def upload_media():
-    """Handle both single file and chunked uploads with scheduling support."""
+    """Handle both single file and chunked uploads with scheduling and caption support."""
     if 'file' not in request.files and 'chunk' not in request.files:
         return jsonify({"error": "No file provided"}), 400
 
@@ -1443,6 +1464,9 @@ def upload_media():
     account_id = request.form.get('account_id')
     platform = request.form.get('platform')
     user_id = request.form.get('user_id')
+    
+    # Extract caption from form data
+    caption = request.form.get('caption', '')
 
     if not account_id or not platform or not user_id:
         return jsonify({"error": "Missing required parameters: account_id, platform, user_id"}), 400
@@ -1502,6 +1526,45 @@ def upload_media():
         # Build Google Drive service
         service = build('drive', 'v3', credentials=creds)
 
+        # Check if file already exists in the folder to prevent duplicates
+        try:
+            query = f"name = '{file.filename}' and '{folder_id}' in parents and trashed = false"
+            existing_files = service.files().list(
+                q=query,
+                spaces='drive',
+                fields='files(id, name)',
+                pageSize=1
+            ).execute()
+            
+            if existing_files.get('files'):
+                # File already exists, return success without uploading
+                existing_file = existing_files['files'][0]
+                print(f"📁 File already exists in Drive: {file.filename}, using existing file ID: {existing_file['id']}")
+                
+                # Still process scheduling data
+                schedule_data = {
+                    'schedule_type': request.form.get('schedule_type', 'range'),
+                    'scheduled_datetime': request.form.get('scheduled_datetime'),
+                    'original_name': file.filename,
+                    'file_id': existing_file['id'],
+                    'caption': caption
+                }
+                process_upload_with_scheduling(platform, account_id, schedule_data)
+                
+                conn.close()
+                return jsonify({
+                    "message": "File already exists in Drive, scheduling updated",
+                    "file_id": existing_file['id'],
+                    "file_name": file.filename,
+                    "drive_link": f"https://drive.google.com/file/d/{existing_file['id']}/view",
+                    "caption": caption,
+                    "success": True,
+                    "duplicate": True  # Add flag to identify duplicates
+                }), 200
+        except Exception as e:
+            print(f"⚠️ Could not check for existing files: {str(e)}")
+            # Continue with upload if check fails
+
         # Save temp file
         temp_dir = 'temp_uploads'
         os.makedirs(temp_dir, exist_ok=True)
@@ -1528,7 +1591,7 @@ def upload_media():
             body=file_metadata, media_body=media, fields='id,name,webViewLink,createdTime'
         ).execute()
 
-        # Clean up duplicate files
+        # Clean up duplicate files (keep only the most recent)
         cleanup_duplicate_files(service, folder_id, file.filename or unique_filename, uploaded_file['id'])
 
         # Close and clean temp file
@@ -1545,12 +1608,13 @@ def upload_media():
                 else:
                     print(f"Warning: Could not delete temp file {temp_path}")
 
-        # PROCESS SCHEDULING DATA AFTER SUCCESSFUL UPLOAD
+        # PROCESS SCHEDULING DATA WITH CAPTION AFTER SUCCESSFUL UPLOAD
         schedule_data = {
             'schedule_type': request.form.get('schedule_type', 'range'),
             'scheduled_datetime': request.form.get('scheduled_datetime'),
             'original_name': file.filename or unique_filename,
-            'file_id': uploaded_file['id']
+            'file_id': uploaded_file['id'],
+            'caption': caption
         }
         process_upload_with_scheduling(platform, account_id, schedule_data)
 
@@ -1562,6 +1626,7 @@ def upload_media():
             "file_id": uploaded_file['id'],
             "file_name": uploaded_file['name'],
             "drive_link": uploaded_file.get('webViewLink', ''),
+            "caption": caption,
             "success": True
         }), 200
 
