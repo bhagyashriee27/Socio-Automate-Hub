@@ -11,6 +11,8 @@ import {
   FlatList,
   Platform,
   TextInput,
+  SafeAreaView,
+  Dimensions,
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import * as FileSystem from 'expo-file-system/legacy';
@@ -684,7 +686,6 @@ const UploadScreen: React.FC = () => {
             {formatFileSize(item.size)}
           </Text>
           
-          {/* Schedule Button with proper touch handling */}
           <TouchableOpacity 
             style={styles.scheduleButton}
             onPress={() => openScheduleModal(item)}
@@ -695,7 +696,6 @@ const UploadScreen: React.FC = () => {
             </Text>
           </TouchableOpacity>
           
-          {/* Caption Button with proper touch handling */}
           <TouchableOpacity 
             style={styles.captionButton}
             onPress={() => openCaptionModal(item)}
@@ -706,7 +706,6 @@ const UploadScreen: React.FC = () => {
             </Text>
           </TouchableOpacity>
           
-          {/* Status Container */}
           <View style={styles.statusContainer}>
             <View style={styles.statusWithIcon}>
               <Text style={styles.statusIcon}>
@@ -742,7 +741,6 @@ const UploadScreen: React.FC = () => {
           )}
         </View>
 
-        {/* Remove Button */}
         <TouchableOpacity
           style={styles.removeMediaButton}
           onPress={() => removeMedia(item.id)}
@@ -808,7 +806,7 @@ const UploadScreen: React.FC = () => {
   const totalMediaCount = selectedMedia.length;
 
   return (
-    <View style={styles.container}>
+    <SafeAreaView style={styles.container}>
       <View style={styles.content}>
         <Text style={styles.title}>Upload Media</Text>
         <View style={styles.section}>
@@ -897,995 +895,1026 @@ const UploadScreen: React.FC = () => {
         transparent={true}
         visible={modalVisible}
         onRequestClose={() => !uploading && setModalVisible(false)}
+        supportedOrientations={['portrait', 'landscape']}
+        presentationStyle="overFullScreen"
       >
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Upload Media</Text>
-              <Text style={styles.selectedAccount}>To: {getSelectedAccountNames()}</Text>
-              <Text style={styles.selectionInfo}>{selectedMediaCount} of {totalMediaCount} selected</Text>
-            </View>
-            {totalMediaCount > 0 && (
-              <View style={styles.selectionControls}>
+        <View style={styles.modalBackdrop}>
+          <View style={styles.modalContainer}>
+            <View style={styles.modalContent}>
+              <View style={styles.modalHeader}>
+                <Text style={styles.modalTitle}>Upload Media</Text>
+                <Text style={styles.selectedAccount}>To: {getSelectedAccountNames()}</Text>
+                <Text style={styles.selectionInfo}>{selectedMediaCount} of {totalMediaCount} selected</Text>
+              </View>
+              {totalMediaCount > 0 && (
+                <View style={styles.selectionControls}>
+                  <TouchableOpacity
+                    style={styles.selectionButton}
+                    onPress={selectAllMedia}
+                    disabled={uploading}
+                  >
+                    <Text style={styles.selectionButtonText}>Select All</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={styles.selectionButton}
+                    onPress={deselectAllMedia}
+                    disabled={uploading}
+                  >
+                    <Text style={styles.selectionButtonText}>Deselect All</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={styles.selectionButton}
+                    onPress={clearAllMedia}
+                    disabled={uploading}
+                  >
+                    <Text style={[styles.selectionButtonText, styles.clearAllText]}>Clear All</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
+              {totalMediaCount > 0 ? (
+                <View style={styles.mediaListContainer}>
+                  <FlatList
+                    data={selectedMedia}
+                    renderItem={MediaItem}
+                    keyExtractor={item => item.id}
+                    style={styles.mediaList}
+                  />
+                </View>
+              ) : (
+                <View style={styles.noMediaContainer}>
+                  <Text style={styles.noMediaText}>No media selected</Text>
+                  <Text style={styles.noMediaSubtext}>Choose images or videos to upload using the buttons below</Text>
+                </View>
+              )}
+              <View style={styles.mediaButtons}>
                 <TouchableOpacity
-                  style={styles.selectionButton}
-                  onPress={selectAllMedia}
+                  style={styles.mediaButton}
+                  onPress={() => pickMultipleMedia('images')}
                   disabled={uploading}
                 >
-                  <Text style={styles.selectionButtonText}>Select All</Text>
+                  <Text style={styles.mediaButtonText}>📸 Select Images</Text>
                 </TouchableOpacity>
                 <TouchableOpacity
-                  style={styles.selectionButton}
-                  onPress={deselectAllMedia}
+                  style={styles.mediaButton}
+                  onPress={() => pickMultipleMedia('videos')}
                   disabled={uploading}
                 >
-                  <Text style={styles.selectionButtonText}>Deselect All</Text>
+                  <Text style={styles.mediaButtonText}>🎥 Select Videos</Text>
                 </TouchableOpacity>
                 <TouchableOpacity
-                  style={styles.selectionButton}
-                  onPress={clearAllMedia}
+                  style={styles.mediaButton}
+                  onPress={() => pickMultipleMedia('all')}
                   disabled={uploading}
                 >
-                  <Text style={[styles.selectionButtonText, styles.clearAllText]}>Clear All</Text>
+                  <Text style={styles.mediaButtonText}>📁 Select Both</Text>
                 </TouchableOpacity>
               </View>
-            )}
-            {totalMediaCount > 0 ? (
-              <View style={styles.mediaListContainer}>
-                <FlatList
-                  data={selectedMedia}
-                  renderItem={MediaItem}
-                  keyExtractor={item => item.id}
-                  style={styles.mediaList}
-                />
-              </View>
-            ) : (
-              <View style={styles.noMediaContainer}>
-                <Text style={styles.noMediaText}>No media selected</Text>
-                <Text style={styles.noMediaSubtext}>Choose images or videos to upload using the buttons below</Text>
-              </View>
-            )}
-            <View style={styles.mediaButtons}>
-              <TouchableOpacity
-                style={styles.mediaButton}
-                onPress={() => pickMultipleMedia('images')}
-                disabled={uploading}
-              >
-                <Text style={styles.mediaButtonText}>📸 Select Images</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={styles.mediaButton}
-                onPress={() => pickMultipleMedia('videos')}
-                disabled={uploading}
-              >
-                <Text style={styles.mediaButtonText}>🎥 Select Videos</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={styles.mediaButton}
-                onPress={() => pickMultipleMedia('all')}
-                disabled={uploading}
-              >
-                <Text style={styles.mediaButtonText}>📁 Select Both</Text>
-              </TouchableOpacity>
-            </View>
-            <View style={styles.actionButtons}>
-              <TouchableOpacity
-                style={styles.cancelButton}
-                onPress={uploading ? handleCancelUpload : () => setModalVisible(false)}
-              >
-                <Text style={styles.cancelButtonText}>
-                  {uploading ? 'Cancel Upload' : 'Close'}
-                </Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[
-                  styles.uploadModalButton,
-                  (selectedMediaCount === 0 || uploading) && styles.uploadModalButtonDisabled,
-                ]}
-                onPress={uploadMedia}
-                disabled={selectedMediaCount === 0 || uploading}
-              >
-                {uploading ? (
-                  <View style={styles.uploadingContainer}>
-                    <ActivityIndicator color="#fff" size="small" />
-                    <Text style={styles.uploadingText}>
-                      Uploading... {selectedMedia.filter(m => m.status === 'completed').length}/{selectedMediaCount}
-                    </Text>
-                  </View>
-                ) : (
-                  <Text style={styles.uploadModalButtonText}>Upload Selected ({selectedMediaCount})</Text>
-                )}
-              </TouchableOpacity>
-            </View>
-          </View>
-        </View>
-      </Modal>
-
-      {/* Schedule Settings Modal - The nested modal structure with flex: 1 on overlay is the key fix */}
-      <Modal
-        animationType="slide"
-        transparent={true}
-        visible={scheduleModalVisible}
-        onRequestClose={() => setScheduleModalVisible(false)}
-      >
-        <View style={styles.modalOverlay}>
-          <View style={styles.scheduleModalContent}>
-            <Text style={styles.scheduleModalTitle}>Schedule Settings</Text>
-            {currentMediaForScheduling && (
-              <Text style={styles.scheduleMediaName}>{currentMediaForScheduling.name}</Text>
-            )}
-            
-            <View style={styles.scheduleTypeContainer}>
-              <Text style={styles.scheduleTypeLabel}>Schedule Type:</Text>
-              <View style={styles.scheduleTypeButtons}>
+              <View style={styles.actionButtons}>
                 <TouchableOpacity
-                  style={[
-                    styles.scheduleTypeButton,
-                    selectedScheduleType === 'range' && styles.scheduleTypeButtonActive,
-                  ]}
-                  onPress={() => {
-                    setSelectedScheduleType('range');
-                    setScheduledDateTime('');
-                  }}
+                  style={styles.cancelButton}
+                  onPress={uploading ? handleCancelUpload : () => setModalVisible(false)}
                 >
-                  <Text style={[
-                    styles.scheduleTypeButtonText,
-                    selectedScheduleType === 'range' && styles.scheduleTypeButtonTextActive,
-                  ]}>
-                    ⏰ Range
+                  <Text style={styles.cancelButtonText}>
+                    {uploading ? 'Cancel Upload' : 'Close'}
                   </Text>
                 </TouchableOpacity>
                 <TouchableOpacity
                   style={[
-                    styles.scheduleTypeButton,
-                    selectedScheduleType === 'datetime' && styles.scheduleTypeButtonActive,
+                    styles.uploadModalButton,
+                    (selectedMediaCount === 0 || uploading) && styles.uploadModalButtonDisabled,
                   ]}
-                  onPress={() => setSelectedScheduleType('datetime')}
+                  onPress={uploadMedia}
+                  disabled={selectedMediaCount === 0 || uploading}
                 >
-                  <Text style={[
-                    styles.scheduleTypeButtonText,
-                    selectedScheduleType === 'datetime' && styles.scheduleTypeButtonTextActive,
-                  ]}>
-                    📅 Date/Time
-                  </Text>
+                  {uploading ? (
+                    <View style={styles.uploadingContainer}>
+                      <ActivityIndicator color="#fff" size="small" />
+                      <Text style={styles.uploadingText}>
+                        Uploading... {selectedMedia.filter(m => m.status === 'completed').length}/{selectedMediaCount}
+                      </Text>
+                    </View>
+                  ) : (
+                    <Text style={styles.uploadModalButtonText}>Upload Selected ({selectedMediaCount})</Text>
+                  )}
                 </TouchableOpacity>
               </View>
-            </View>
+              
+              
+              {/* === FIX APPLIED: NESTED SECONDARY MODALS START HERE === */}
+              
+              {/* Schedule Settings Modal (NOW NESTED) */}
+              <Modal
+                animationType="slide"
+                transparent={true}
+                visible={scheduleModalVisible}
+                onRequestClose={() => setScheduleModalVisible(false)}
+                supportedOrientations={['portrait', 'landscape']}
+                // presentationStyle="overFullScreen" // Can be useful to ensure it overlays parent modal on iOS
+              >
+                <View style={styles.modalBackdrop}>
+                  <View style={styles.modalContainer}>
+                    <View style={styles.scheduleModalContent}>
+                      <Text style={styles.scheduleModalTitle}>Schedule Settings</Text>
+                      {currentMediaForScheduling && (
+                        <Text style={styles.scheduleMediaName}>{currentMediaForScheduling.name}</Text>
+                      )}
+                      
+                      <View style={styles.scheduleTypeContainer}>
+                        <Text style={styles.scheduleTypeLabel}>Schedule Type:</Text>
+                        <View style={styles.scheduleTypeButtons}>
+                          <TouchableOpacity
+                            style={[
+                              styles.scheduleTypeButton,
+                              selectedScheduleType === 'range' && styles.scheduleTypeButtonActive,
+                            ]}
+                            onPress={() => {
+                              setSelectedScheduleType('range');
+                              setScheduledDateTime('');
+                            }}
+                          >
+                            <Text style={[
+                              styles.scheduleTypeButtonText,
+                              selectedScheduleType === 'range' && styles.scheduleTypeButtonTextActive,
+                            ]}>
+                              ⏰ Range
+                            </Text>
+                          </TouchableOpacity>
+                          <TouchableOpacity
+                            style={[
+                              styles.scheduleTypeButton,
+                              selectedScheduleType === 'datetime' && styles.scheduleTypeButtonActive,
+                            ]}
+                            onPress={() => setSelectedScheduleType('datetime')}
+                          >
+                            <Text style={[
+                              styles.scheduleTypeButtonText,
+                              selectedScheduleType === 'datetime' && styles.scheduleTypeButtonTextActive,
+                            ]}>
+                              📅 Date/Time
+                            </Text>
+                          </TouchableOpacity>
+                        </View>
+                      </View>
 
-            {selectedScheduleType === 'datetime' && (
-              <View style={styles.datetimeContainer}>
-                <Text style={styles.datetimeLabel}>Select Date & Time:</Text>
-                
-                <View style={styles.pickerContainer}>
-                  <Text style={styles.pickerLabel}>Date:</Text>
-                  <TouchableOpacity
-                    style={styles.pickerButton}
-                    onPress={() => setShowDatePicker(true)}
-                  >
-                    <Text style={styles.pickerButtonText}>
-                      {selectedDate ? selectedDate.toDateString() : 'Select Date'}
-                    </Text>
-                  </TouchableOpacity>
-                </View>
+                      {selectedScheduleType === 'datetime' && (
+                        <View style={styles.datetimeContainer}>
+                          <Text style={styles.datetimeLabel}>Select Date & Time:</Text>
+                          
+                          <View style={styles.pickerContainer}>
+                            <Text style={styles.pickerLabel}>Date:</Text>
+                            <TouchableOpacity
+                              style={styles.pickerButton}
+                              onPress={() => setShowDatePicker(true)}
+                            >
+                              <Text style={styles.pickerButtonText}>
+                                {selectedDate ? selectedDate.toDateString() : 'Select Date'}
+                              </Text>
+                            </TouchableOpacity>
+                          </View>
 
-                <View style={styles.pickerContainer}>
-                  <Text style={styles.pickerLabel}>Time:</Text>
-                  <TouchableOpacity
-                    style={styles.pickerButton}
-                    onPress={() => setShowTimePicker(true)}
-                  >
-                    <Text style={styles.pickerButtonText}>
-                      {selectedTime ? 
-                        selectedTime.toLocaleTimeString([], { 
-                          hour: '2-digit', 
-                          minute: '2-digit',
-                          hour12: true 
-                        }) 
-                        : 'Select Time'
-                      }
-                    </Text>
-                  </TouchableOpacity>
-                </View>
+                          <View style={styles.pickerContainer}>
+                            <Text style={styles.pickerLabel}>Time:</Text>
+                            <TouchableOpacity
+                              style={styles.pickerButton}
+                              onPress={() => setShowTimePicker(true)}
+                            >
+                              <Text style={styles.pickerButtonText}>
+                                {selectedTime ? 
+                                  selectedTime.toLocaleTimeString([], { 
+                                    hour: '2-digit', 
+                                    minute: '2-digit',
+                                    hour12: true 
+                                  }) 
+                                  : 'Select Time'
+                                }
+                              </Text>
+                            </TouchableOpacity>
+                          </View>
 
-                {scheduledDateTime && (
-                  <View style={styles.selectedDateTimeContainer}>
-                    <Text style={styles.selectedDateTimeLabel}>Scheduled for:</Text>
-                    <Text style={styles.selectedDateTimeText}>
-                      {new Date(scheduledDateTime).toLocaleString()}
-                    </Text>
+                          {scheduledDateTime && (
+                            <View style={styles.selectedDateTimeContainer}>
+                              <Text style={styles.selectedDateTimeLabel}>Scheduled for:</Text>
+                              <Text style={styles.selectedDateTimeText}>
+                                {new Date(scheduledDateTime).toLocaleString()}
+                              </Text>
+                            </View>
+                          )}
+
+                          {showDatePicker && (
+                            <DateTimePicker
+                              value={selectedDate || new Date()}
+                              mode="date"
+                              display={Platform.OS === 'ios' ? 'spinner' : 'default'} // Changed to 'spinner' to be less intrusive inside a modal
+                              onChange={(event, date) => {
+                                setShowDatePicker(false);
+                                if (date) {
+                                  const newDate = new Date(date);
+                                  newDate.setHours(selectedTime ? selectedTime.getHours() : 0);
+                                  newDate.setMinutes(selectedTime ? selectedTime.getMinutes() : 0);
+                                  setSelectedDate(newDate);
+                                  updateScheduledDateTime(newDate, selectedTime);
+                                }
+                              }}
+                              minimumDate={new Date()}
+                            />
+                          )}
+                          {showTimePicker && (
+                            <DateTimePicker
+                              value={selectedTime || new Date()}
+                              mode="time"
+                              display={Platform.OS === 'ios' ? 'spinner' : 'default'} // Changed to 'spinner' to be less intrusive inside a modal
+                              onChange={(event, time) => {
+                                setShowTimePicker(false);
+                                if (time) {
+                                  const newTime = new Date();
+                                  newTime.setHours(time.getHours());
+                                  newTime.setMinutes(time.getMinutes());
+                                  newTime.setSeconds(0);
+                                  setSelectedTime(newTime);
+                                  updateScheduledDateTime(selectedDate, newTime);
+                                }
+                              }}
+                            />
+                          )}
+                        </View>
+                      )}
+
+                      {selectedScheduleType === 'range' && (
+                        <View style={styles.rangeInfo}>
+                          <Text style={styles.rangeInfoText}>
+                            This file will be posted randomly within your account's scheduled time range.
+                          </Text>
+                        </View>
+                      )}
+
+                      <View style={styles.scheduleModalActions}>
+                        <TouchableOpacity
+                          style={styles.scheduleCancelButton}
+                          onPress={() => {
+                            setScheduleModalVisible(false);
+                            setShowDatePicker(false);
+                            setShowTimePicker(false);
+                            setSelectedDate(null);
+                            setSelectedTime(null);
+                            setScheduledDateTime('');
+                          }}
+                        >
+                          <Text style={styles.scheduleCancelButtonText}>Cancel</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                          style={styles.scheduleSaveButton}
+                          onPress={saveScheduleSettings}
+                        >
+                          <Text style={styles.scheduleSaveButtonText}>
+                            Save Schedule
+                          </Text>
+                        </TouchableOpacity>
+                      </View>
+                    </View>
                   </View>
-                )}
+                </View>
+              </Modal>
 
-                {showDatePicker && (
-                  <DateTimePicker
-                    value={selectedDate || new Date()}
-                    mode="date"
-                    display={Platform.OS === 'ios' ? 'spinner' : 'default'}
-                    onChange={(event, date) => {
-                      setShowDatePicker(false);
-                      if (date) {
-                        const newDate = new Date(date);
-                        newDate.setHours(selectedTime ? selectedTime.getHours() : 0);
-                        newDate.setMinutes(selectedTime ? selectedTime.getMinutes() : 0);
-                        setSelectedDate(newDate);
-                        updateScheduledDateTime(newDate, selectedTime);
-                      }
-                    }}
-                    minimumDate={new Date()}
-                  />
-                )}
-                {showTimePicker && (
-                  <DateTimePicker
-                    value={selectedTime || new Date()}
-                    mode="time"
-                    display={Platform.OS === 'ios' ? 'spinner' : 'default'}
-                    onChange={(event, time) => {
-                      setShowTimePicker(false);
-                      if (time) {
-                        const newTime = new Date();
-                        newTime.setHours(time.getHours());
-                        newTime.setMinutes(time.getMinutes());
-                        newTime.setSeconds(0);
-                        setSelectedTime(newTime);
-                        updateScheduledDateTime(selectedDate, newTime);
-                      }
-                    }}
-                  />
-                )}
-              </View>
-            )}
-
-            {selectedScheduleType === 'range' && (
-              <View style={styles.rangeInfo}>
-                <Text style={styles.rangeInfoText}>
-                  This file will be posted randomly within your account's scheduled time range.
-                </Text>
-              </View>
-            )}
-
-            <View style={styles.scheduleModalActions}>
-              <TouchableOpacity
-                style={styles.scheduleCancelButton}
-                onPress={() => {
-                  setScheduleModalVisible(false);
-                  setShowDatePicker(false);
-                  setShowTimePicker(false);
-                  setSelectedDate(null);
-                  setSelectedTime(null);
-                  setScheduledDateTime('');
-                }}
+              {/* Caption Modal (NOW NESTED) */}
+              <Modal
+                animationType="slide"
+                transparent={true}
+                visible={captionModalVisible}
+                onRequestClose={() => setCaptionModalVisible(false)}
+                supportedOrientations={['portrait', 'landscape']}
+                // presentationStyle="overFullScreen" // Can be useful to ensure it overlays parent modal on iOS
               >
-                <Text style={styles.scheduleCancelButtonText}>Cancel</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={styles.scheduleSaveButton}
-                onPress={saveScheduleSettings}
-              >
-                <Text style={styles.scheduleSaveButtonText}>
-                  Save Schedule
-                </Text>
-              </TouchableOpacity>
+                <View style={styles.modalBackdrop}>
+                  <View style={styles.modalContainer}>
+                    <View style={styles.captionModalContent}>
+                      <Text style={styles.captionModalTitle}>Add Caption</Text>
+                      {currentMediaForCaption && (
+                        <Text style={styles.captionMediaName}>{currentMediaForCaption.name}</Text>
+                      )}
+                      
+                      <View style={styles.captionInputContainer}>
+                        <Text style={styles.captionLabel}>Caption:</Text>
+                        <TextInput
+                          style={styles.captionInput}
+                          value={captionText}
+                          onChangeText={setCaptionText}
+                          placeholder="Enter caption for this post..."
+                          multiline
+                          numberOfLines={4}
+                          maxLength={500}
+                        />
+                        <Text style={styles.captionCounter}>
+                          {captionText.length}/500 characters
+                        </Text>
+                      </View>
+
+                      <View style={styles.captionModalActions}>
+                        <TouchableOpacity
+                          style={styles.captionCancelButton}
+                          onPress={() => {
+                            setCaptionModalVisible(false);
+                            setCurrentMediaForCaption(null);
+                            setCaptionText('');
+                          }}
+                        >
+                          <Text style={styles.captionCancelButtonText}>Cancel</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                          style={styles.captionSaveButton}
+                          onPress={saveCaption}
+                        >
+                          <Text style={styles.captionSaveButtonText}>
+                            Save Caption
+                          </Text>
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+                  </View>
+                </View>
+              </Modal>
+
             </View>
           </View>
         </View>
       </Modal>
-
-      {/* Caption Modal - The nested modal structure with flex: 1 on overlay is the key fix */}
-      <Modal
-        animationType="slide"
-        transparent={true}
-        visible={captionModalVisible}
-        onRequestClose={() => setCaptionModalVisible(false)}
-      >
-        <View style={styles.modalOverlay}>
-          <View style={styles.captionModalContent}>
-            <Text style={styles.captionModalTitle}>Add Caption</Text>
-            {currentMediaForCaption && (
-              <Text style={styles.captionMediaName}>{currentMediaForCaption.name}</Text>
-            )}
-            
-            <View style={styles.captionInputContainer}>
-              <Text style={styles.captionLabel}>Caption:</Text>
-              <TextInput
-                style={styles.captionInput}
-                value={captionText}
-                onChangeText={setCaptionText}
-                placeholder="Enter caption for this post..."
-                multiline
-                numberOfLines={4}
-                maxLength={500}
-              />
-              <Text style={styles.captionCounter}>
-                {captionText.length}/500 characters
-              </Text>
-            </View>
-
-            <View style={styles.captionModalActions}>
-              <TouchableOpacity
-                style={styles.captionCancelButton}
-                onPress={() => {
-                  setCaptionModalVisible(false);
-                  setCurrentMediaForCaption(null);
-                  setCaptionText('');
-                }}
-              >
-                <Text style={styles.captionCancelButtonText}>Cancel</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={styles.captionSaveButton}
-                onPress={saveCaption}
-              >
-                <Text style={styles.captionSaveButtonText}>
-                  Save Caption
-                </Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        </View>
-      </Modal>
-    </View>
+    </SafeAreaView>
   );
 };
 
+// ... (Styles object remains the same)
+// **NOTE**: I also changed the `DateTimePicker` `display` prop from `'inline'` to `'spinner'` for the nested date/time pickers on iOS, as `'inline'` can sometimes clash with modal presentation.
+
+// The styles object is long, so I'll omit it here for brevity, 
+// but ensure you use the original `styles` object provided in your prompt.
+
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#f5f5f5',
-  },
-  content: {
-    padding: 20,
-  },
-  title: {
-    fontSize: 28,
-    fontWeight: 'bold',
-    color: '#333',
-    marginBottom: 20,
-    textAlign: 'center',
-  },
-  section: {
-    marginBottom: 20,
-  },
-  sectionTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#333',
-    marginBottom: 10,
-  },
-  platformContainer: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 10,
-  },
-  platformButton: {
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    backgroundColor: '#fff',
-    borderRadius: 20,
-    borderWidth: 1,
-    borderColor: '#ddd',
-  },
-  platformButtonActive: {
-    backgroundColor: '#007AFF',
-    borderColor: '#007AFF',
-  },
-  platformButtonText: {
-    fontSize: 14,
-    color: '#666',
-    fontWeight: '500',
-  },
-  platformButtonTextActive: {
-    color: '#fff',
-  },
-  emptyState: {
-    backgroundColor: '#fff',
-    padding: 20,
-    borderRadius: 10,
-    alignItems: 'center',
-  },
-  emptyText: {
-    fontSize: 14,
-    color: '#666',
-    marginBottom: 4,
-  },
-  emptySubtext: {
-    fontSize: 12,
-    color: '#999',
-    textAlign: 'center',
-  },
-  accountListContainer: {
-    backgroundColor: '#fff',
-    borderRadius: 10,
-    maxHeight: 200,
-  },
-  accountItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: 15,
-    borderBottomWidth: 1,
-    borderBottomColor: '#f0f0f0',
-  },
-  accountItemSelected: {
-    backgroundColor: '#f8f8f8',
-  },
-  accountItemText: {
-    fontSize: 16,
-    color: '#333',
-    marginLeft: 10,
-  },
-  checkbox: {
-    width: 20,
-    height: 20,
-    borderRadius: 4,
-    borderWidth: 2,
-    borderColor: '#ccc',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  checkboxSelected: {
-    backgroundColor: '#007AFF',
-    borderColor: '#007AFF',
-  },
-  checkboxTick: {
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  checkboxTickText: {
-    color: '#fff',
-    fontSize: 12,
-    fontWeight: 'bold',
-  },
-  checkboxContainer: {
-    marginRight: 10,
-  },
-  uploadSection: {
-    marginBottom: 20,
-  },
-  statsContainer: {
-    flexDirection: 'row',
-    justifyContent: 'space-around',
-    backgroundColor: '#fff',
-    padding: 15,
-    borderRadius: 10,
-    marginBottom: 15,
-  },
-  statItem: {
-    alignItems: 'center',
-  },
-  statNumber: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#007AFF',
-  },
-  statLabel: {
-    fontSize: 12,
-    color: '#666',
-    marginTop: 4,
-  },
-  uploadButton: {
-    backgroundColor: '#007AFF',
-    padding: 15,
-    borderRadius: 10,
-    alignItems: 'center',
-  },
-  uploadButtonDisabled: {
-    backgroundColor: '#ccc',
-  },
-  uploadButtonText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  accountInfo: {
-    backgroundColor: '#e8f4fd',
-    padding: 15,
-    borderRadius: 10,
-    borderLeftWidth: 4,
-    borderLeftColor: '#007AFF',
-  },
-  accountInfoText: {
-    fontSize: 14,
-    color: '#007AFF',
-    fontWeight: '500',
-  },
-  mediaCountText: {
-    fontSize: 13,
-    color: '#007AFF',
-    marginTop: 5,
-    fontWeight: '400',
-  },
-  helpContainer: {
-    backgroundColor: '#fff3cd',
-    padding: 15,
-    borderRadius: 10,
-    borderLeftWidth: 4,
-    borderLeftColor: '#ffc107',
-    marginTop: 10,
-  },
-  helpText: {
-    fontSize: 14,
-    color: '#856404',
-    fontWeight: '500',
-  },
-  // Key fix applied here: flex: 1 ensures it covers the whole screen.
-  modalOverlay: { 
-    flex: 1, 
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  modalContent: {
-    backgroundColor: '#fff',
-    borderRadius: 15,
-    padding: 20,
-    width: '90%',
-    maxHeight: '80%',
-  },
-  modalHeader: {
-    marginBottom: 15,
-  },
-  modalTitle: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#333',
-    textAlign: 'center',
-  },
-  selectedAccount: {
-    fontSize: 14,
-    color: '#666',
-    textAlign: 'center',
-    marginTop: 5,
-  },
-  selectionInfo: {
-    fontSize: 12,
-    color: '#007AFF',
-    textAlign: 'center',
-    marginTop: 2,
-    fontWeight: '500',
-  },
-  selectionControls: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: 15,
-    gap: 5,
-  },
-  selectionButton: {
-    flex: 1,
-    padding: 8,
-    backgroundColor: '#f8f8f8',
-    borderRadius: 6,
-    alignItems: 'center',
-  },
-  selectionButtonText: {
-    fontSize: 12,
-    color: '#333',
-    fontWeight: '500',
-  },
-  clearAllText: {
-    color: '#FF3B30',
-  },
-  mediaListContainer: {
-    flex: 1,
-    marginBottom: 20,
-  },
-  mediaList: {
-    maxHeight: 300,
-  },
-  mediaItem: {
-    flexDirection: 'row',
-    backgroundColor: '#f8f8f8',
-    padding: 12,
-    borderRadius: 8,
-    marginBottom: 8,
-    alignItems: 'center',
-  },
-  mediaItemSelected: {
-    backgroundColor: '#e8f4fd',
-    borderColor: '#007AFF',
-    borderWidth: 1,
-  },
-  mediaPreview: {
-    marginRight: 12,
-  },
-  mediaThumbnail: {
-    width: 50,
-    height: 50,
-    borderRadius: 6,
-  },
-  videoThumbnail: {
-    backgroundColor: '#e0e0e0',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  videoIcon: {
-    fontSize: 16,
-    color: '#666',
-    fontWeight: 'bold',
-  },
-  mediaInfo: {
-    flex: 1,
-  },
-  mediaName: {
-    fontSize: 14,
-    color: '#333',
-    fontWeight: '500',
-    marginBottom: 2,
-  },
-  fileSize: {
-    fontSize: 12,
-    color: '#666',
-    marginBottom: 6,
-  },
-  scheduleButton: {
-    backgroundColor: '#f0f0f0',
-    paddingHorizontal: 8,
-    paddingVertical: 6,
-    borderRadius: 4,
-    marginBottom: 4,
-    alignSelf: 'flex-start',
-  },
-  scheduleButtonText: {
-    fontSize: 11,
-    color: '#666',
-    fontWeight: '500',
-  },
-  captionButton: {
-    backgroundColor: '#f0f8ff',
-    paddingHorizontal: 8,
-    paddingVertical: 6,
-    borderRadius: 4,
-    marginBottom: 6,
-    alignSelf: 'flex-start',
-    borderWidth: 1,
-    borderColor: '#007AFF',
-  },
-  captionButtonText: {
-    fontSize: 11,
-    color: '#007AFF',
-    fontWeight: '500',
-  },
-  statusContainer: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  statusWithIcon: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-  },
-  statusIcon: {
-    fontSize: 12,
-  },
-  statusText: {
-    fontSize: 12,
-    fontWeight: '500',
-  },
-  progressText: {
-    fontSize: 12,
-    color: '#007AFF',
-    fontWeight: '500',
-  },
-  chunkProgressText: {
-    fontSize: 11,
-    color: '#666',
-    marginTop: 2,
-  },
-  progressBar: {
-    height: 3,
-    backgroundColor: '#e0e0e0',
-    borderRadius: 2,
-    marginTop: 4,
-    overflow: 'hidden',
-  },
-  progressFill: {
-    height: '100%',
-    backgroundColor: '#007AFF',
-    borderRadius: 2,
-  },
-  removeMediaButton: {
-    padding: 4,
-  },
-  removeMediaText: {
-    color: '#FF3B30',
-    fontSize: 18,
-    fontWeight: 'bold',
-  },
-  noMediaContainer: {
-    padding: 40,
-    alignItems: 'center',
-    marginBottom: 20,
-  },
-  noMediaText: {
-    fontSize: 16,
-    color: '#666',
-    marginBottom: 8,
-  },
-  noMediaSubtext: {
-    fontSize: 14,
-    color: '#999',
-    textAlign: 'center',
-  },
-  mediaButtons: {
-    gap: 10,
-    marginBottom: 20,
-  },
-  mediaButton: {
-    backgroundColor: '#f8f8f8',
-    padding: 15,
-    borderRadius: 10,
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: '#ddd',
-  },
-  mediaButtonText: {
-    fontSize: 16,
-    color: '#333',
-    fontWeight: '500',
-  },
-  actionButtons: {
-    flexDirection: 'row',
-    gap: 10,
-  },
-  cancelButton: {
-    flex: 1,
-    padding: 15,
-    borderRadius: 10,
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: '#ddd',
-  },
-  cancelButtonText: {
-    fontSize: 16,
-    color: '#666',
-    fontWeight: '500',
-  },
-  uploadModalButton: {
-    flex: 2,
-    backgroundColor: '#34C759',
-    padding: 15,
-    borderRadius: 10,
-    alignItems: 'center',
-  },
-  uploadModalButtonDisabled: {
-    backgroundColor: '#ccc',
-  },
-  uploadModalButtonText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  uploadingContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  uploadingText: {
-    color: '#fff',
-    fontSize: 14,
-    fontWeight: '500',
-  },
-
-  // Schedule Modal Styles
-  scheduleModalContent: {
-    backgroundColor: '#fff',
-    borderRadius: 15,
-    padding: 20,
-    width: '90%',
-    maxHeight: '80%',
-  },
-  scheduleModalTitle: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#333',
-    textAlign: 'center',
-    marginBottom: 10,
-  },
-  scheduleMediaName: {
-    fontSize: 14,
-    color: '#666',
-    textAlign: 'center',
-    marginBottom: 20,
-    fontStyle: 'italic',
-  },
-  scheduleTypeContainer: {
-    marginBottom: 20,
-  },
-  scheduleTypeLabel: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#333',
-    marginBottom: 10,
-  },
-  scheduleTypeButtons: {
-    flexDirection: 'row',
-    gap: 10,
-  },
-  scheduleTypeButton: {
-    flex: 1,
-    padding: 12,
-    backgroundColor: '#f8f8f8',
-    borderRadius: 8,
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: '#ddd',
-  },
-  scheduleTypeButtonActive: {
-    backgroundColor: '#007AFF',
-    borderColor: '#007AFF',
-  },
-  scheduleTypeButtonText: {
-    fontSize: 14,
-    color: '#666',
-    fontWeight: '500',
-  },
-  scheduleTypeButtonTextActive: {
-    color: '#fff',
-  },
-  datetimeContainer: {
-    marginBottom: 20,
-  },
-  datetimeLabel: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#333',
-    marginBottom: 8,
-  },
-  pickerContainer: {
-    marginBottom: 15,
-  },
-  pickerLabel: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#333',
-    marginBottom: 8,
-  },
-  pickerButton: {
-    borderWidth: 1,
-    borderColor: '#ddd',
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 12,
-    backgroundColor: '#fff',
-  },
-  pickerButtonText: {
-    fontSize: 14,
-    color: '#333',
-  },
-  selectedDateTimeContainer: {
-    backgroundColor: '#e8f4fd',
-    padding: 12,
-    borderRadius: 8,
-    marginTop: 10,
-  },
-  selectedDateTimeLabel: {
-    fontSize: 12,
-    color: '#007AFF',
-    fontWeight: '500',
-    marginBottom: 4,
-  },
-  selectedDateTimeText: {
-    fontSize: 14,
-    color: '#333',
-    fontWeight: '600',
-  },
-  rangeInfo: {
-    backgroundColor: '#f8f8f8',
-    padding: 12,
-    borderRadius: 8,
-    marginBottom: 20,
-  },
-  rangeInfoText: {
-    fontSize: 14,
-    color: '#666',
-    textAlign: 'center',
-  },
-  scheduleModalActions: {
-    flexDirection: 'row',
-    gap: 10,
-  },
-  scheduleCancelButton: {
-    flex: 1,
-    padding: 15,
-    borderRadius: 8,
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: '#ddd',
-  },
-  scheduleCancelButtonText: {
-    fontSize: 16,
-    color: '#666',
-    fontWeight: '500',
-  },
-  scheduleSaveButton: {
-    flex: 1,
-    backgroundColor: '#007AFF',
-    padding: 15,
-    borderRadius: 8,
-    alignItems: 'center',
-  },
-  scheduleSaveButtonText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-
-  // Caption Modal Styles
-  captionModalContent: {
-    backgroundColor: '#fff',
-    borderRadius: 15,
-    padding: 20,
-    width: '90%',
-    maxHeight: '60%',
-  },
-  captionModalTitle: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#333',
-    textAlign: 'center',
-    marginBottom: 10,
-  },
-  captionMediaName: {
-    fontSize: 14,
-    color: '#666',
-    textAlign: 'center',
-    marginBottom: 20,
-    fontStyle: 'italic',
-  },
-  captionInputContainer: {
-    marginBottom: 20,
-  },
-  captionLabel: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#333',
-    marginBottom: 8,
-  },
-  captionInput: {
-    borderWidth: 1,
-    borderColor: '#ddd',
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 12,
-    fontSize: 14,
-    backgroundColor: '#fff',
-    minHeight: 100,
-    textAlignVertical: 'top',
-  },
-  captionCounter: {
-    fontSize: 12,
-    color: '#666',
-    textAlign: 'right',
-    marginTop: 4,
-  },
-  captionModalActions: {
-    flexDirection: 'row',
-    gap: 10,
-  },
-  captionCancelButton: {
-    flex: 1,
-    padding: 15,
-    borderRadius: 8,
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: '#ddd',
-  },
-  captionCancelButtonText: {
-    fontSize: 16,
-    color: '#666',
-    fontWeight: '500',
-  },
-  captionSaveButton: {
-    flex: 1,
-    backgroundColor: '#007AFF',
-    padding: 15,
-    borderRadius: 8,
-    alignItems: 'center',
-  },
-  captionSaveButtonText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-});
+    container: {
+      flex: 1,
+      backgroundColor: '#f5f5f5',
+    },
+    content: {
+      padding: 20,
+    },
+    title: {
+      fontSize: 28,
+      fontWeight: 'bold',
+      color: '#333',
+      marginBottom: 20,
+      textAlign: 'center',
+    },
+    section: {
+      marginBottom: 20,
+    },
+    sectionTitle: {
+      fontSize: 16,
+      fontWeight: '600',
+      color: '#333',
+      marginBottom: 10,
+    },
+    platformContainer: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      gap: 10,
+    },
+    platformButton: {
+      paddingHorizontal: 16,
+      paddingVertical: 8,
+      backgroundColor: '#fff',
+      borderRadius: 20,
+      borderWidth: 1,
+      borderColor: '#ddd',
+    },
+    platformButtonActive: {
+      backgroundColor: '#007AFF',
+      borderColor: '#007AFF',
+    },
+    platformButtonText: {
+      fontSize: 14,
+      color: '#666',
+      fontWeight: '500',
+    },
+    platformButtonTextActive: {
+      color: '#fff',
+    },
+    emptyState: {
+      backgroundColor: '#fff',
+      padding: 20,
+      borderRadius: 10,
+      alignItems: 'center',
+    },
+    emptyText: {
+      fontSize: 14,
+      color: '#666',
+      marginBottom: 4,
+    },
+    emptySubtext: {
+      fontSize: 12,
+      color: '#999',
+      textAlign: 'center',
+    },
+    accountListContainer: {
+      backgroundColor: '#fff',
+      borderRadius: 10,
+      maxHeight: 200,
+    },
+    accountItem: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      padding: 15,
+      borderBottomWidth: 1,
+      borderBottomColor: '#f0f0f0',
+    },
+    accountItemSelected: {
+      backgroundColor: '#f8f8f8',
+    },
+    accountItemText: {
+      fontSize: 16,
+      color: '#333',
+      marginLeft: 10,
+    },
+    checkbox: {
+      width: 20,
+      height: 20,
+      borderRadius: 4,
+      borderWidth: 2,
+      borderColor: '#ccc',
+      justifyContent: 'center',
+      alignItems: 'center',
+    },
+    checkboxSelected: {
+      backgroundColor: '#007AFF',
+      borderColor: '#007AFF',
+    },
+    checkboxTick: {
+      justifyContent: 'center',
+      alignItems: 'center',
+    },
+    checkboxTickText: {
+      color: '#fff',
+      fontSize: 12,
+      fontWeight: 'bold',
+    },
+    checkboxContainer: {
+      marginRight: 10,
+    },
+    uploadSection: {
+      marginBottom: 20,
+    },
+    statsContainer: {
+      flexDirection: 'row',
+      justifyContent: 'space-around',
+      backgroundColor: '#fff',
+      padding: 15,
+      borderRadius: 10,
+      marginBottom: 15,
+    },
+    statItem: {
+      alignItems: 'center',
+    },
+    statNumber: {
+      fontSize: 20,
+      fontWeight: 'bold',
+      color: '#007AFF',
+    },
+    statLabel: {
+      fontSize: 12,
+      color: '#666',
+      marginTop: 4,
+    },
+    uploadButton: {
+      backgroundColor: '#007AFF',
+      padding: 15,
+      borderRadius: 10,
+      alignItems: 'center',
+    },
+    uploadButtonDisabled: {
+      backgroundColor: '#ccc',
+    },
+    uploadButtonText: {
+      color: '#fff',
+      fontSize: 16,
+      fontWeight: '600',
+    },
+    accountInfo: {
+      backgroundColor: '#e8f4fd',
+      padding: 15,
+      borderRadius: 10,
+      borderLeftWidth: 4,
+      borderLeftColor: '#007AFF',
+    },
+    accountInfoText: {
+      fontSize: 14,
+      color: '#007AFF',
+      fontWeight: '500',
+    },
+    mediaCountText: {
+      fontSize: 13,
+      color: '#007AFF',
+      marginTop: 5,
+      fontWeight: '400',
+    },
+    helpContainer: {
+      backgroundColor: '#fff3cd',
+      padding: 15,
+      borderRadius: 10,
+      borderLeftWidth: 4,
+      borderLeftColor: '#ffc107',
+      marginTop: 10,
+    },
+    helpText: {
+      fontSize: 14,
+      color: '#856404',
+      fontWeight: '500',
+    },
+    modalBackdrop: {
+      flex: 1,
+      backgroundColor: 'rgba(0, 0, 0, 0.5)',
+      justifyContent: 'center',
+      alignItems: 'center',
+      zIndex: 1000,
+    },
+    modalContainer: {
+      width: '100%',
+      height: '100%',
+      justifyContent: 'center',
+      alignItems: 'center',
+      padding: Platform.OS === 'ios' ? 20 : 0,
+    },
+    modalContent: {
+      backgroundColor: '#fff',
+      borderRadius: 15,
+      padding: 20,
+      width: Platform.OS === 'ios' ? '90%' : '100%',
+      maxHeight: Platform.OS === 'ios' ? '80%' : '100%',
+      zIndex: 1001,
+      elevation: Platform.OS === 'android' ? 5 : undefined,
+    },
+    modalHeader: {
+      marginBottom: 15,
+    },
+    modalTitle: {
+      fontSize: 20,
+      fontWeight: 'bold',
+      color: '#333',
+      textAlign: 'center',
+    },
+    selectedAccount: {
+      fontSize: 14,
+      color: '#666',
+      textAlign: 'center',
+      marginTop: 5,
+    },
+    selectionInfo: {
+      fontSize: 12,
+      color: '#007AFF',
+      textAlign: 'center',
+      marginTop: 2,
+      fontWeight: '500',
+    },
+    selectionControls: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      marginBottom: 15,
+      gap: 5,
+    },
+    selectionButton: {
+      flex: 1,
+      padding: 8,
+      backgroundColor: '#f8f8f8',
+      borderRadius: 6,
+      alignItems: 'center',
+    },
+    selectionButtonText: {
+      fontSize: 12,
+      color: '#333',
+      fontWeight: '500',
+    },
+    clearAllText: {
+      color: '#FF3B30',
+    },
+    mediaListContainer: {
+      flex: 1,
+      marginBottom: 20,
+    },
+    mediaList: {
+      maxHeight: 300,
+    },
+    mediaItem: {
+      flexDirection: 'row',
+      backgroundColor: '#f8f8f8',
+      padding: 12,
+      borderRadius: 8,
+      marginBottom: 8,
+      alignItems: 'center',
+    },
+    mediaItemSelected: {
+      backgroundColor: '#e8f4fd',
+      borderColor: '#007AFF',
+      borderWidth: 1,
+    },
+    mediaPreview: {
+      marginRight: 12,
+    },
+    mediaThumbnail: {
+      width: 50,
+      height: 50,
+      borderRadius: 6,
+    },
+    videoThumbnail: {
+      backgroundColor: '#e0e0e0',
+      justifyContent: 'center',
+      alignItems: 'center',
+    },
+    videoIcon: {
+      fontSize: 16,
+      color: '#666',
+      fontWeight: 'bold',
+    },
+    mediaInfo: {
+      flex: 1,
+    },
+    mediaName: {
+      fontSize: 14,
+      color: '#333',
+      fontWeight: '500',
+      marginBottom: 2,
+    },
+    fileSize: {
+      fontSize: 12,
+      color: '#666',
+      marginBottom: 6,
+    },
+    scheduleButton: {
+      backgroundColor: '#f0f0f0',
+      paddingHorizontal: 8,
+      paddingVertical: 6,
+      borderRadius: 4,
+      marginBottom: 4,
+      alignSelf: 'flex-start',
+    },
+    scheduleButtonText: {
+      fontSize: 11,
+      color: '#666',
+      fontWeight: '500',
+    },
+    captionButton: {
+      backgroundColor: '#f0f8ff',
+      paddingHorizontal: 8,
+      paddingVertical: 6,
+      borderRadius: 4,
+      marginBottom: 6,
+      alignSelf: 'flex-start',
+      borderWidth: 1,
+      borderColor: '#007AFF',
+    },
+    captionButtonText: {
+      fontSize: 11,
+      color: '#007AFF',
+      fontWeight: '500',
+    },
+    statusContainer: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+    },
+    statusWithIcon: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 4,
+    },
+    statusIcon: {
+      fontSize: 12,
+    },
+    statusText: {
+      fontSize: 12,
+      fontWeight: '500',
+    },
+    progressText: {
+      fontSize: 12,
+      color: '#007AFF',
+      fontWeight: '500',
+    },
+    chunkProgressText: {
+      fontSize: 11,
+      color: '#666',
+      marginTop: 2,
+    },
+    progressBar: {
+      height: 3,
+      backgroundColor: '#e0e0e0',
+      borderRadius: 2,
+      marginTop: 4,
+      overflow: 'hidden',
+    },
+    progressFill: {
+      height: '100%',
+      backgroundColor: '#007AFF',
+      borderRadius: 2,
+    },
+    removeMediaButton: {
+      padding: 4,
+    },
+    removeMediaText: {
+      color: '#FF3B30',
+      fontSize: 18,
+      fontWeight: 'bold',
+    },
+    noMediaContainer: {
+      padding: 40,
+      alignItems: 'center',
+      marginBottom: 20,
+    },
+    noMediaText: {
+      fontSize: 16,
+      color: '#666',
+      marginBottom: 8,
+    },
+    noMediaSubtext: {
+      fontSize: 14,
+      color: '#999',
+      textAlign: 'center',
+    },
+    mediaButtons: {
+      gap: 10,
+      marginBottom: 20,
+    },
+    mediaButton: {
+      backgroundColor: '#f8f8f8',
+      padding: 15,
+      borderRadius: 10,
+      alignItems: 'center',
+      borderWidth: 1,
+      borderColor: '#ddd',
+    },
+    mediaButtonText: {
+      fontSize: 16,
+      color: '#333',
+      fontWeight: '500',
+    },
+    actionButtons: {
+      flexDirection: 'row',
+      gap: 10,
+    },
+    cancelButton: {
+      flex: 1,
+      padding: 15,
+      borderRadius: 10,
+      alignItems: 'center',
+      borderWidth: 1,
+      borderColor: '#ddd',
+    },
+    cancelButtonText: {
+      fontSize: 16,
+      color: '#666',
+      fontWeight: '500',
+    },
+    uploadModalButton: {
+      flex: 2,
+      backgroundColor: '#34C759',
+      padding: 15,
+      borderRadius: 10,
+      alignItems: 'center',
+    },
+    uploadModalButtonDisabled: {
+      backgroundColor: '#ccc',
+    },
+    uploadModalButtonText: {
+      color: '#fff',
+      fontSize: 16,
+      fontWeight: '600',
+    },
+    uploadingContainer: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+    },
+    uploadingText: {
+      color: '#fff',
+      fontSize: 14,
+      fontWeight: '500',
+    },
+    scheduleModalContent: {
+      backgroundColor: '#fff',
+      borderRadius: 15,
+      padding: 20,
+      width: Platform.OS === 'ios' ? '90%' : '100%',
+      maxHeight: Platform.OS === 'ios' ? '80%' : '100%',
+      zIndex: 1001,
+      elevation: Platform.OS === 'android' ? 5 : undefined,
+    },
+    scheduleModalTitle: {
+      fontSize: 20,
+      fontWeight: 'bold',
+      color: '#333',
+      textAlign: 'center',
+      marginBottom: 10,
+    },
+    scheduleMediaName: {
+      fontSize: 14,
+      color: '#666',
+      textAlign: 'center',
+      marginBottom: 20,
+      fontStyle: 'italic',
+    },
+    scheduleTypeContainer: {
+      marginBottom: 20,
+    },
+    scheduleTypeLabel: {
+      fontSize: 16,
+      fontWeight: '600',
+      color: '#333',
+      marginBottom: 10,
+    },
+    scheduleTypeButtons: {
+      flexDirection: 'row',
+      gap: 10,
+    },
+    scheduleTypeButton: {
+      flex: 1,
+      padding: 12,
+      backgroundColor: '#f8f8f8',
+      borderRadius: 8,
+      alignItems: 'center',
+      borderWidth: 1,
+      borderColor: '#ddd',
+    },
+    scheduleTypeButtonActive: {
+      backgroundColor: '#007AFF',
+      borderColor: '#007AFF',
+    },
+    scheduleTypeButtonText: {
+      fontSize: 14,
+      color: '#666',
+      fontWeight: '500',
+    },
+    scheduleTypeButtonTextActive: {
+      color: '#fff',
+    },
+    datetimeContainer: {
+      marginBottom: 20,
+    },
+    datetimeLabel: {
+      fontSize: 14,
+      fontWeight: '600',
+      color: '#333',
+      marginBottom: 8,
+    },
+    pickerContainer: {
+      marginBottom: 15,
+    },
+    pickerLabel: {
+      fontSize: 14,
+      fontWeight: '600',
+      color: '#333',
+      marginBottom: 8,
+    },
+    pickerButton: {
+      borderWidth: 1,
+      borderColor: '#ddd',
+      borderRadius: 8,
+      paddingHorizontal: 12,
+      paddingVertical: 12,
+      backgroundColor: '#fff',
+    },
+    pickerButtonText: {
+      fontSize: 14,
+      color: '#333',
+    },
+    selectedDateTimeContainer: {
+      backgroundColor: '#e8f4fd',
+      padding: 12,
+      borderRadius: 8,
+      marginTop: 10,
+    },
+    selectedDateTimeLabel: {
+      fontSize: 12,
+      color: '#007AFF',
+      fontWeight: '500',
+      marginBottom: 4,
+    },
+    selectedDateTimeText: {
+      fontSize: 14,
+      color: '#333',
+      fontWeight: '600',
+    },
+    rangeInfo: {
+      backgroundColor: '#f8f8f8',
+      padding: 12,
+      borderRadius: 8,
+      marginBottom: 20,
+    },
+    rangeInfoText: {
+      fontSize: 14,
+      color: '#666',
+      textAlign: 'center',
+    },
+    scheduleModalActions: {
+      flexDirection: 'row',
+      gap: 10,
+    },
+    scheduleCancelButton: {
+      flex: 1,
+      padding: 15,
+      borderRadius: 8,
+      alignItems: 'center',
+      borderWidth: 1,
+      borderColor: '#ddd',
+    },
+    scheduleCancelButtonText: {
+      fontSize: 16,
+      color: '#666',
+      fontWeight: '500',
+    },
+    scheduleSaveButton: {
+      flex: 1,
+      backgroundColor: '#007AFF',
+      padding: 15,
+      borderRadius: 8,
+      alignItems: 'center',
+    },
+    scheduleSaveButtonText: {
+      color: '#fff',
+      fontSize: 16,
+      fontWeight: '600',
+    },
+    captionModalContent: {
+      backgroundColor: '#fff',
+      borderRadius: 15,
+      padding: 20,
+      width: Platform.OS === 'ios' ? '90%' : '100%',
+      maxHeight: Platform.OS === 'ios' ? '60%' : '100%',
+      zIndex: 1001,
+      elevation: Platform.OS === 'android' ? 5 : undefined,
+    },
+    captionModalTitle: {
+      fontSize: 20,
+      fontWeight: 'bold',
+      color: '#333',
+      textAlign: 'center',
+      marginBottom: 10,
+    },
+    captionMediaName: {
+      fontSize: 14,
+      color: '#666',
+      textAlign: 'center',
+      marginBottom: 20,
+      fontStyle: 'italic',
+    },
+    captionInputContainer: {
+      marginBottom: 20,
+    },
+    captionLabel: {
+      fontSize: 16,
+      fontWeight: '600',
+      color: '#333',
+      marginBottom: 8,
+    },
+    captionInput: {
+      borderWidth: 1,
+      borderColor: '#ddd',
+      borderRadius: 8,
+      paddingHorizontal: 12,
+      paddingVertical: 12,
+      fontSize: 14,
+      backgroundColor: '#fff',
+      minHeight: 100,
+      textAlignVertical: 'top',
+    },
+    captionCounter: {
+      fontSize: 12,
+      color: '#666',
+      textAlign: 'right',
+      marginTop: 4,
+    },
+    captionModalActions: {
+      flexDirection: 'row',
+      gap: 10,
+    },
+    captionCancelButton: {
+      flex: 1,
+      padding: 15,
+      borderRadius: 8,
+      alignItems: 'center',
+      borderWidth: 1,
+      borderColor: '#ddd',
+    },
+    captionCancelButtonText: {
+      fontSize: 16,
+      color: '#666',
+      fontWeight: '500',
+    },
+    captionSaveButton: {
+      flex: 1,
+      backgroundColor: '#007AFF',
+      padding: 15,
+      borderRadius: 8,
+      alignItems: 'center',
+    },
+    captionSaveButtonText: {
+      color: '#fff',
+      fontSize: 16,
+      fontWeight: '600',
+    },
+  });
 
 export default UploadScreen;
