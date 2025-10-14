@@ -409,21 +409,20 @@ def get_dashboard():
         """, (email_id,))
         youtube_result = cursor.fetchone()
         
-        # Calculate posts for today (single query per platform)
+        # Calculate posts for today using post_daily_range_left
         today = datetime.now(TIMEZONE).date()
         tomorrow = today + timedelta(days=1)
         
         posts_today = 0
         for platform in ['instagram', 'telegram', 'facebook', 'youtube']:
             cursor.execute(f"""
-                SELECT COUNT(*) as count 
+                SELECT SUM(post_daily_range_left) as total_posts 
                 FROM {platform} 
                 WHERE user_id = %s 
-                AND next_post_time >= %s 
-                AND next_post_time < %s
-            """, (email_id, today, tomorrow))
+                AND selected = 'Yes'
+            """, (email_id,))
             result = cursor.fetchone()
-            posts_today += result['count'] if result else 0
+            posts_today += result['total_posts'] if result and result['total_posts'] else 0
         
         cursor.close()
         conn.close()
@@ -648,6 +647,9 @@ def update_instagram(record_id):
     sch_start_range = data.get('sch_start_range')
     sch_end_range = data.get('sch_end_range')
     number_of_posts = data.get('number_of_posts')
+    
+    # NEW: Get post_daily_range from request
+    post_daily_range = data.get('post_daily_range')
 
     # Validation
     if email and not validate_email(email):
@@ -662,6 +664,10 @@ def update_instagram(record_id):
         return jsonify({"error": "Invalid sch_end_range format (use HH:MM:SS)"}), 400
     if number_of_posts is not None and number_of_posts < 0:
         return jsonify({"error": "Number of posts must be non-negative"}), 400
+    
+    # NEW: Validate post_daily_range
+    if post_daily_range is not None and post_daily_range < 0:
+        return jsonify({"error": "Daily post range must be non-negative"}), 400
 
     # Fetch user_id if email provided
     user_id = None
@@ -713,6 +719,15 @@ def update_instagram(record_id):
             updates.append("number_of_posts = %s")
             updates.append("posts_left = %s")
             params.extend([number_of_posts, number_of_posts])
+        
+        # NEW: Handle post_daily_range
+        if post_daily_range is not None:
+            updates.append("post_daily_range = %s")
+            updates.append("post_daily_range_left = %s")
+            params.extend([post_daily_range, post_daily_range])
+            # Also reset last_reset to trigger daily counter refresh
+            updates.append("last_reset = %s")
+            params.append(datetime.now(TIMEZONE).strftime('%Y-%m-%d %H:%M:%S'))
 
         if not updates:
             cursor.close()
@@ -740,9 +755,13 @@ def update_telegram(record_id):
     email = data.get('email')
     channel_name = data.get('channel_name')
     token_sesson = data.get('token_sesson')
+    google_drive_link = data.get('google_drive_link')  # ✅ ADDED: Get google_drive_link from request
     sch_start_range = data.get('sch_start_range')
     sch_end_range = data.get('sch_end_range')
     number_of_posts = data.get('number_of_posts')
+    
+    # NEW: Get post_daily_range from request
+    post_daily_range = data.get('post_daily_range')
 
     # Validation
     if email and not validate_email(email):
@@ -757,6 +776,10 @@ def update_telegram(record_id):
         return jsonify({"error": "Invalid sch_end_range format (use HH:MM:SS)"}), 400
     if number_of_posts is not None and number_of_posts < 0:
         return jsonify({"error": "Number of posts must be non-negative"}), 400
+    
+    # NEW: Validate post_daily_range
+    if post_daily_range is not None and post_daily_range < 0:
+        return jsonify({"error": "Daily post range must be non-negative"}), 400
 
     # Fetch user_id if email provided
     user_id = None
@@ -798,6 +821,9 @@ def update_telegram(record_id):
         if email:
             updates.append("email = %s")
             params.append(email)
+        if google_drive_link:  # ✅ ADDED: Include google_drive_link in updates
+            updates.append("google_drive_link = %s")
+            params.append(google_drive_link)
         if sch_start_range:
             updates.append("sch_start_range = %s")
             params.append(sch_start_range)
@@ -808,6 +834,15 @@ def update_telegram(record_id):
             updates.append("number_of_posts = %s")
             updates.append("posts_left = %s")
             params.extend([number_of_posts, number_of_posts])
+        
+        # NEW: Handle post_daily_range
+        if post_daily_range is not None:
+            updates.append("post_daily_range = %s")
+            updates.append("post_daily_range_left = %s")
+            params.extend([post_daily_range, post_daily_range])
+            # Also reset last_reset to trigger daily counter refresh
+            updates.append("last_reset = %s")
+            params.append(datetime.now(TIMEZONE).strftime('%Y-%m-%d %H:%M:%S'))
 
         if not updates:
             cursor.close()
@@ -827,6 +862,9 @@ def update_telegram(record_id):
     except mysql.connector.Error as e:
         conn.close()
         return jsonify({"error": f"Database error: {str(e)}"}), 500
+    
+    
+    
 @app.route('/delete-media', methods=['DELETE'])
 def delete_media():
     """Delete media from Google Drive and schedule."""
@@ -1916,6 +1954,210 @@ def schedule_status():
         conn.close()
         return jsonify({"error": f"Database error: {str(e)}"}), 500
 
+
+@app.route('/schedule/update-account', methods=['PATCH'])
+def update_schedule_account():
+    """Update account data from ScheduleScreen - supports all platforms."""
+    data = request.get_json()
+    platform = data.get('platform')
+    record_id = data.get('record_id')
+    update_data = data.get('update_data', {})
+
+    # Validation
+    if not platform or platform not in ['instagram', 'telegram', 'youtube', 'facebook']:
+        return jsonify({"error": "Invalid platform"}), 400
+    if not record_id:
+        return jsonify({"error": "Record ID is required"}), 400
+    if not update_data:
+        return jsonify({"error": "No update data provided"}), 400
+
+    conn = get_db_connection()
+    if not conn:
+        return jsonify({"error": "Database connection failed"}), 500
+
+    try:
+        cursor = conn.cursor()
+        
+        # Verify record exists
+        cursor.execute(f"SELECT id FROM {platform} WHERE id = %s", (record_id,))
+        if not cursor.fetchone():
+            cursor.close()
+            conn.close()
+            return jsonify({"error": f"{platform.capitalize()} record not found"}), 404
+
+        # Build dynamic update query
+        updates = []
+        params = []
+        
+        # Common fields for all platforms
+        common_fields = [
+            'username', 'email', 'google_drive_link', 'sch_start_range', 
+            'sch_end_range', 'post_daily_range', 'selected'
+        ]
+        
+        for field in common_fields:
+            if field in update_data and update_data[field] is not None:
+                if field == 'post_daily_range':
+                    # Handle post_daily_range with post_daily_range_left
+                    updates.append("post_daily_range = %s")
+                    updates.append("post_daily_range_left = %s")
+                    params.extend([update_data[field], update_data[field]])
+                    updates.append("last_reset = %s")
+                    params.append(datetime.now(TIMEZONE).strftime('%Y-%m-%d %H:%M:%S'))
+                elif field == 'selected':
+                    updates.append("selected = %s")
+                    params.append(update_data[field])
+                else:
+                    updates.append(f"{field} = %s")
+                    params.append(update_data[field])
+        
+        # Platform-specific fields
+        if platform == 'instagram' and 'password' in update_data and update_data['password']:
+            updates.append("passwand = %s")
+            params.append(update_data['password'])
+            
+        elif platform == 'telegram' and 'channel_name' in update_data:
+            updates.append("channel_name = %s")
+            params.append(update_data['channel_name'])
+            
+        elif platform == 'youtube' and 'channel_id' in update_data:
+            updates.append("channel_id = %s")
+            params.append(update_data['channel_id'])
+
+        if not updates:
+            cursor.close()
+            conn.close()
+            return jsonify({"error": "No valid fields to update"}), 400
+
+        # Reset scheduling fields
+        updates.extend(["done = 'No'", "next_post_time = NULL"])
+        
+        query = f"UPDATE {platform} SET {', '.join(updates)} WHERE id = %s"
+        params.append(record_id)
+
+        cursor.execute(query, params)
+        conn.commit()
+        cursor.close()
+        conn.close()
+        
+        return jsonify({"message": f"{platform.capitalize()} account updated successfully"}), 200
+        
+    except mysql.connector.Error as e:
+        conn.close()
+        return jsonify({"error": f"Database error: {str(e)}"}), 500
+
+
+
+@app.route('/youtube/<int:record_id>', methods=['PATCH'])
+def update_youtube(record_id):
+    """Update an existing YouTube channel."""
+    data = request.get_json()
+    email = data.get('email')
+    username = data.get('username')
+    google_drive_link = data.get('google_drive_link')  # ✅ ADDED
+    sch_start_range = data.get('sch_start_range')
+    sch_end_range = data.get('sch_end_range')
+    number_of_posts = data.get('number_of_posts')
+    
+    # NEW: Get post_daily_range from request
+    post_daily_range = data.get('post_daily_range')
+
+    # Validation
+    if email and not validate_email(email):
+        return jsonify({"error": "Invalid email format"}), 400
+    if username and len(username) < 3:
+        return jsonify({"error": "Username must be at least 3 characters long"}), 400
+    if sch_start_range and not time_to_timedelta(sch_start_range):
+        return jsonify({"error": "Invalid sch_start_range format (use HH:MM:SS)"}), 400
+    if sch_end_range and not time_to_timedelta(sch_end_range):
+        return jsonify({"error": "Invalid sch_end_range format (use HH:MM:SS)"}), 400
+    if number_of_posts is not None and number_of_posts < 0:
+        return jsonify({"error": "Number of posts must be non-negative"}), 400
+    
+    # NEW: Validate post_daily_range
+    if post_daily_range is not None and post_daily_range < 0:
+        return jsonify({"error": "Daily post range must be non-negative"}), 400
+
+    # Fetch user_id if email provided
+    user_id = None
+    if email:
+        user_id = get_user_id_from_email(email)
+        if not user_id:
+            return jsonify({"error": "User not available for the provided email"}), 400
+
+    conn = get_db_connection()
+    if not conn:
+        return jsonify({"error": "Database connection failed"}), 500
+
+    try:
+        cursor = conn.cursor()
+        # Verify record exists
+        cursor.execute("SELECT user_id FROM youtube WHERE id = %s", (record_id,))
+        result = cursor.fetchone()
+        if not result:
+            cursor.close()
+            conn.close()
+            return jsonify({"error": "YouTube record not found"}), 400
+        current_user_id = result[0]
+
+        # If email provided, ensure it matches the record's user_id
+        if user_id and user_id != current_user_id:
+            cursor.close()
+            conn.close()
+            return jsonify({"error": "Email does not match the user associated with this YouTube record"}), 400
+
+        # Build dynamic update query
+        updates = []
+        params = []
+        if username:
+            updates.append("username = %s")
+            params.append(username)
+        if email:
+            updates.append("email = %s")
+            params.append(email)
+        if google_drive_link:  # ✅ ADDED: Include google_drive_link
+            updates.append("google_drive_link = %s")
+            params.append(google_drive_link)
+        if sch_start_range:
+            updates.append("sch_start_range = %s")
+            params.append(sch_start_range)
+        if sch_end_range:
+            updates.append("sch_end_range = %s")
+            params.append(sch_end_range)
+        if number_of_posts is not None:
+            updates.append("number_of_posts = %s")
+            updates.append("posts_left = %s")
+            params.extend([number_of_posts, number_of_posts])
+        
+        # NEW: Handle post_daily_range
+        if post_daily_range is not None:
+            updates.append("post_daily_range = %s")
+            updates.append("post_daily_range_left = %s")
+            params.extend([post_daily_range, post_daily_range])
+            # Also reset last_reset to trigger daily counter refresh
+            updates.append("last_reset = %s")
+            params.append(datetime.now(TIMEZONE).strftime('%Y-%m-%d %H:%M:%S'))
+
+        if not updates:
+            cursor.close()
+            conn.close()
+            return jsonify({"error": "No fields provided to update"}), 400
+
+        # Always reset scheduling fields
+        updates.extend(["selected = 'No'", "done = 'No'", "next_post_time = NULL"])
+        query = f"UPDATE youtube SET {', '.join(updates)} WHERE id = %s"
+        params.append(record_id)
+
+        cursor.execute(query, params)
+        conn.commit()
+        cursor.close()
+        conn.close()
+        return jsonify({"message": "YouTube channel updated successfully"}), 200
+    except mysql.connector.Error as e:
+        conn.close()
+        return jsonify({"error": f"Database error: {str(e)}"}), 500
+    
+    
 @app.route('/posts/add', methods=['POST'])
 def add_posts():
     """Add posts to an existing platform record."""
@@ -2014,8 +2256,11 @@ def export_data():
             cursor.execute(query)
         result['users'] = serialize_records(cursor.fetchall())
 
-        # Fetch Instagram accounts
-        query = "SELECT id, user_id, username, email, sch_start_range, sch_end_range, number_of_posts, posts_left, next_post_time FROM instagram"
+        # Fetch Instagram accounts - ADDED NEW FIELDS
+        query = """SELECT id, user_id, username, email, sch_start_range, sch_end_range, 
+                          number_of_posts, posts_left, next_post_time,
+                          post_daily_range, post_daily_range_left, last_reset  -- ADDED
+                   FROM instagram"""
         if user_id:
             query += " WHERE user_id = %s"
             cursor.execute(query, (user_id,))
@@ -2023,8 +2268,11 @@ def export_data():
             cursor.execute(query)
         result['instagram'] = serialize_records(cursor.fetchall())
 
-        # Fetch Telegram channels
-        query = "SELECT id, user_id, channel_name, email, sch_start_range, sch_end_range, number_of_posts, posts_left, next_post_time FROM telegram"
+        # Fetch Telegram channels - ADDED NEW FIELDS
+        query = """SELECT id, user_id, channel_name, email, sch_start_range, 
+                          sch_end_range, number_of_posts, posts_left, next_post_time,
+                          post_daily_range, post_daily_range_left, last_reset  -- ADDED
+                   FROM telegram"""
         if user_id:
             query += " WHERE user_id = %s"
             cursor.execute(query, (user_id,))
@@ -2032,8 +2280,11 @@ def export_data():
             cursor.execute(query)
         result['telegram'] = serialize_records(cursor.fetchall())
 
-        # Fetch Facebook pages
-        query = "SELECT id, user_id, username, email, channel_name, sch_start_range, sch_end_range, number_of_posts, posts_left, next_post_time FROM facebook"
+        # Fetch Facebook pages - ADDED NEW FIELDS
+        query = """SELECT id, user_id, username, email, channel_name, sch_start_range, 
+                          sch_end_range, number_of_posts, posts_left, next_post_time,
+                          post_daily_range, post_daily_range_left, last_reset  -- ADDED
+                   FROM facebook"""
         if user_id:
             query += " WHERE user_id = %s"
             cursor.execute(query, (user_id,))
@@ -2041,8 +2292,11 @@ def export_data():
             cursor.execute(query)
         result['facebook'] = serialize_records(cursor.fetchall())
 
-        # Fetch YouTube channels
-        query = "SELECT id, user_id, username, email, sch_start_range, sch_end_range, number_of_posts, posts_left, next_post_time FROM youtube"
+        # Fetch YouTube channels - ADDED NEW FIELDS
+        query = """SELECT id, user_id, username, email, sch_start_range, 
+                          sch_end_range, number_of_posts, posts_left, next_post_time,
+                          post_daily_range, post_daily_range_left, last_reset  -- ADDED
+                   FROM youtube"""
         if user_id:
             query += " WHERE user_id = %s"
             cursor.execute(query, (user_id,))
@@ -2068,7 +2322,11 @@ def add_instagram():
     google_drive_link = data.get('google_drive_link')
     sch_start_range = data.get('sch_start_range', '20:00:00')
     sch_end_range = data.get('sch_end_range', '17:00:00')
-    number_of_posts = data.get('number_of_posts', 0)
+    
+    # NEW: Get post_daily_range sent from frontend
+    post_daily_range = data.get('post_daily_range', 0) 
+    # OLD: number_of_posts should default to 0 to be superseded
+    number_of_posts = data.get('number_of_posts', 0) 
 
     # Validation
     if not email or not validate_email(email):
@@ -2081,8 +2339,9 @@ def add_instagram():
     end_td = time_to_timedelta(sch_end_range)
     if not start_td or not end_td:
         return jsonify({"error": "Invalid time format for sch_start_range or sch_end_range (use HH:MM:SS)"}), 400
-    if number_of_posts < 0:
-        return jsonify({"error": "Number of posts must be non-negative"}), 400
+    # Use post_daily_range for validation
+    if post_daily_range < 0:
+        return jsonify({"error": "Number of posts daily must be non-negative"}), 400
 
     # Fetch user_id from email
     user_id = get_user_id_from_email(email)
@@ -2099,6 +2358,9 @@ def add_instagram():
         cursor.execute("SELECT id FROM instagram WHERE user_id = %s AND username = %s", (user_id, username))
         existing = cursor.fetchone()
 
+        # Set default for post_daily_range_left
+        post_daily_range_left = post_daily_range
+
         if existing:
             # Update existing record
             query = """
@@ -2110,15 +2372,27 @@ def add_instagram():
                     google_drive_link = %s, 
                     sch_start_range = %s, 
                     sch_end_range = %s, 
-                    number_of_posts = %s, 
-                    posts_left = %s, 
+                    
+                    number_of_posts = %s,  -- Deprecated, set to 0
+                    posts_left = %s,        -- Deprecated, set to 0
+                    
+                    post_daily_range = %s,       -- NEW FIELD
+                    post_daily_range_left = %s,  -- NEW FIELD
+                    last_reset = %s,             -- Reset daily counter timestamp
+                    
                     selected = 'No', 
                     done = 'No', 
                     schedule_type = 'range', 
                     next_post_time = NULL 
                 WHERE id = %s
             """
-            cursor.execute(query, (password, email, token_sesson, token_sesson, google_drive_link, sch_start_range, sch_end_range, number_of_posts, number_of_posts, existing[0]))
+            cursor.execute(query, (
+                password, email, token_sesson, token_sesson, google_drive_link, 
+                sch_start_range, sch_end_range, 
+                0, 0, # old posts fields
+                post_daily_range, post_daily_range_left, datetime.now(TIMEZONE).strftime('%Y-%m-%d %H:%M:%S'), # new daily posts fields
+                existing[0]
+            ))
             record_id = existing[0]
             action = "updated"
         else:
@@ -2127,15 +2401,17 @@ def add_instagram():
                 INSERT INTO instagram (
                     user_id, username, passwand, email, token_sesson, token_drive, google_drive_link, 
                     sch_start_range, sch_end_range, sch_date, sch_time, 
-                    number_of_posts, posts_left, selected, done, schedule_type
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'No', 'No', 'range')
+                    number_of_posts, posts_left, selected, done, schedule_type,
+                    post_daily_range, post_daily_range_left, last_reset
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'No', 'No', 'range', %s, %s, %s)
             """
             sch_date = datetime.now(TIMEZONE).strftime('%Y-%m-%d')
             sch_time = '12:00:00'
             cursor.execute(query, (
                 user_id, username, password, email, token_sesson, token_sesson, google_drive_link,
                 sch_start_range, sch_end_range, sch_date, sch_time,
-                number_of_posts, number_of_posts
+                0, 0, # old posts fields
+                post_daily_range, post_daily_range_left, datetime.now(TIMEZONE).strftime('%Y-%m-%d %H:%M:%S') # new daily posts fields
             ))
             record_id = cursor.lastrowid
             action = "created"
@@ -2148,6 +2424,7 @@ def add_instagram():
         conn.close()
         return jsonify({"error": f"Database error: {str(e)}"}), 500
 
+
 @app.route('/telegram', methods=['POST'])
 def add_telegram():
     """Add or update a Telegram channel for a user."""
@@ -2157,7 +2434,12 @@ def add_telegram():
     token_sesson = data.get('token_sesson')
     sch_start_range = data.get('sch_start_range', '09:00:00')  # Default 9 AM
     sch_end_range = data.get('sch_end_range', '17:00:00')      # Default 5 PM
-    number_of_posts = data.get('number_of_posts', 0)
+    
+    # NEW: Get post_daily_range sent from frontend
+    post_daily_range = data.get('post_daily_range', 0)
+    
+    # OLD: number_of_posts should default to 0 to be superseded
+    number_of_posts = data.get('number_of_posts', 0) 
 
     # Validation
     if not email or not validate_email(email):
@@ -2170,8 +2452,9 @@ def add_telegram():
     end_td = time_to_timedelta(sch_end_range)
     if not start_td or not end_td:
         return jsonify({"error": "Invalid time format for sch_start_range or sch_end_range (use HH:MM:SS)"}), 400
-    if number_of_posts < 0:
-        return jsonify({"error": "Number of posts must be non-negative"}), 400
+    # Use post_daily_range for validation
+    if post_daily_range < 0:
+        return jsonify({"error": "Number of posts daily must be non-negative"}), 400
 
     # Fetch user_id from email
     user_id = get_user_id_from_email(email)
@@ -2187,6 +2470,9 @@ def add_telegram():
         # Check if Telegram channel exists for user
         cursor.execute("SELECT id FROM telegram WHERE user_id = %s AND channel_name = %s", (user_id, channel_name))
         existing = cursor.fetchone()
+        
+        # Set default for post_daily_range_left
+        post_daily_range_left = post_daily_range
 
         if existing:
             # Update existing record
@@ -2197,15 +2483,26 @@ def add_telegram():
                     google_drive_link = NULL, 
                     sch_start_range = %s, 
                     sch_end_range = %s, 
-                    number_of_posts = %s, 
-                    posts_left = %s, 
+                    
+                    number_of_posts = %s,  -- Deprecated, set to 0
+                    posts_left = %s,        -- Deprecated, set to 0
+                    
+                    post_daily_range = %s,
+                    post_daily_range_left = %s,
+                    last_reset = %s,
+                    
                     selected = 'No', 
                     done = 'No', 
                     schedule_type = 'range', 
                     next_post_time = NULL 
                 WHERE id = %s
             """
-            cursor.execute(query, (token_sesson, email, sch_start_range, sch_end_range, number_of_posts, number_of_posts, existing[0]))
+            cursor.execute(query, (
+                token_sesson, email, sch_start_range, sch_end_range, 
+                0, 0, # old posts fields
+                post_daily_range, post_daily_range_left, datetime.now(TIMEZONE).strftime('%Y-%m-%d %H:%M:%S'), # new daily posts fields
+                existing[0]
+            ))
             record_id = existing[0]
             action = "updated"
         else:
@@ -2214,15 +2511,17 @@ def add_telegram():
                 INSERT INTO telegram (
                     user_id, channel_name, token_sesson, email, google_drive_link, 
                     sch_start_range, sch_end_range, sch_date, sch_time, 
-                    number_of_posts, posts_left, selected, done, schedule_type
-                ) VALUES (%s, %s, %s, %s, NULL, %s, %s, %s, %s, %s, %s, 'No', 'No', 'range')
+                    number_of_posts, posts_left, selected, done, schedule_type,
+                    post_daily_range, post_daily_range_left, last_reset
+                ) VALUES (%s, %s, %s, %s, NULL, %s, %s, %s, %s, %s, %s, 'No', 'No', 'range', %s, %s, %s)
             """
             sch_date = datetime.now(TIMEZONE).strftime('%Y-%m-%d')
             sch_time = '12:00:00'
             cursor.execute(query, (
                 user_id, channel_name, token_sesson, email,
                 sch_start_range, sch_end_range, sch_date, sch_time,
-                number_of_posts, number_of_posts
+                0, 0, # old posts fields
+                post_daily_range, post_daily_range_left, datetime.now(TIMEZONE).strftime('%Y-%m-%d %H:%M:%S') # new daily posts fields
             ))
             record_id = cursor.lastrowid
             action = "created"
@@ -2338,12 +2637,17 @@ def add_youtube():
     data = request.get_json()
     email = data.get('email')
     username = data.get('username')
-    token_sesson = data.get('token_sesson', "{}")  # Default to empty JSON for session token
+    token_sesson = data.get('token_sesson', "{}")
     channel_id = data.get('channel_id')
-    google_drive_link = data.get('google_drive_link')  # Use database column name
+    google_drive_link = data.get('google_drive_link')
     sch_start_range = data.get('sch_start_range', '09:00:00')
     sch_end_range = data.get('sch_end_range', '17:00:00')
-    number_of_posts = data.get('number_of_posts', 0)
+    
+    # NEW: Get post_daily_range sent from frontend
+    post_daily_range = data.get('post_daily_range', 0)
+    
+    # OLD: number_of_posts should default to 0 to be superseded
+    number_of_posts = data.get('number_of_posts', 0) 
 
     # Validation
     if not email or not validate_email(email):
@@ -2356,8 +2660,9 @@ def add_youtube():
     end_td = time_to_timedelta(sch_end_range)
     if not start_td or not end_td:
         return jsonify({"error": "Invalid time format for sch_start_range or sch_end_range (use HH:MM:SS)"}), 400
-    if number_of_posts < 0:
-        return jsonify({"error": "Number of posts must be non-negative"}), 400
+    # Use post_daily_range for validation
+    if post_daily_range < 0:
+        return jsonify({"error": "Number of posts daily must be non-negative"}), 400
 
     # Fetch user_id from email
     user_id = get_user_id_from_email(email)
@@ -2373,6 +2678,9 @@ def add_youtube():
         # Check if YouTube channel exists for user
         cursor.execute("SELECT id FROM youtube WHERE user_id = %s AND username = %s", (user_id, username))
         existing = cursor.fetchone()
+        
+        # Set default for post_daily_range_left
+        post_daily_range_left = post_daily_range
 
         if existing:
             # Update existing record
@@ -2381,11 +2689,17 @@ def add_youtube():
                     token_sesson = %s,
                     email = %s,
                     channel_id = %s,
-                    google_drive_link = %s,  -- Ensure this matches the database
+                    google_drive_link = %s,
                     sch_start_range = %s,
                     sch_end_range = %s,
-                    number_of_posts = %s,
-                    posts_left = %s,
+                    
+                    number_of_posts = %s,  -- Deprecated, set to 0
+                    posts_left = %s,        -- Deprecated, set to 0
+                    
+                    post_daily_range = %s,
+                    post_daily_range_left = %s,
+                    last_reset = %s,
+                    
                     selected = 'No',
                     done = 'No',
                     schedule_type = 'range',
@@ -2394,7 +2708,9 @@ def add_youtube():
             """
             cursor.execute(query, (
                 token_sesson, email, channel_id, google_drive_link,
-                sch_start_range, sch_end_range, number_of_posts, number_of_posts,
+                sch_start_range, sch_end_range, 
+                0, 0, # old posts fields
+                post_daily_range, post_daily_range_left, datetime.now(TIMEZONE).strftime('%Y-%m-%d %H:%M:%S'), # new daily posts fields
                 existing[0]
             ))
             record_id = existing[0]
@@ -2405,15 +2721,17 @@ def add_youtube():
                 INSERT INTO youtube (
                     user_id, username, token_sesson, email, channel_id, google_drive_link,
                     sch_start_range, sch_end_range, sch_date, sch_time,
-                    number_of_posts, posts_left, selected, done, schedule_type
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'No', 'No', 'range')
+                    number_of_posts, posts_left, selected, done, schedule_type,
+                    post_daily_range, post_daily_range_left, last_reset
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'No', 'No', 'range', %s, %s, %s)
             """
             sch_date = datetime.now(TIMEZONE).strftime('%Y-%m-%d')
             sch_time = '12:00:00'
             cursor.execute(query, (
                 user_id, username, token_sesson, email, channel_id, google_drive_link,
                 sch_start_range, sch_end_range, sch_date, sch_time,
-                number_of_posts, number_of_posts
+                0, 0, # old posts fields
+                post_daily_range, post_daily_range_left, datetime.now(TIMEZONE).strftime('%Y-%m-%d %H:%M:%S') # new daily posts fields
             ))
             record_id = cursor.lastrowid
             action = "created"
@@ -2501,36 +2819,40 @@ def get_user(user_id):
                 serialized.append(serialized_record)
             return serialized
 
-        # Fetch Instagram accounts - ADD ALL FIELDS including selected
+        # Fetch Instagram accounts - ADDED NEW FIELDS
         cursor.execute("""
             SELECT id, username, passwand, email, token_sesson, google_drive_link, 
                    selected, sch_start_range, sch_end_range, sch_date, sch_time,
-                   number_of_posts, posts_left, done, schedule_type, next_post_time
+                   number_of_posts, posts_left, done, schedule_type, next_post_time,
+                   post_daily_range, post_daily_range_left, last_reset  -- ADDED THESE
             FROM instagram WHERE user_id = %s
         """, (user_id,))
         instagram_accounts = serialize_records(cursor.fetchall())
 
-        # Fetch Telegram channels - ADD ALL FIELDS including selected
+        # Fetch Telegram channels - ADDED NEW FIELDS
         cursor.execute("""
             SELECT id, channel_name, token_sesson, email, google_drive_link,
                    selected, sch_start_range, sch_end_range, sch_date, sch_time,
-                   number_of_posts, posts_left, done, schedule_type, next_post_time
+                   number_of_posts, posts_left, done, schedule_type, next_post_time,
+                   post_daily_range, post_daily_range_left, last_reset  -- ADDED THESE
             FROM telegram WHERE user_id = %s
         """, (user_id,))
         telegram_channels = serialize_records(cursor.fetchall())
 
-        # Fetch Facebook pages
+        # Fetch Facebook pages - ADDED NEW FIELDS
         cursor.execute("""
             SELECT id, username, email, channel_name, sch_start_range, sch_end_range, 
-                   number_of_posts, posts_left, selected
+                   number_of_posts, posts_left, selected,
+                   post_daily_range, post_daily_range_left, last_reset  -- ADDED THESE
             FROM facebook WHERE user_id = %s
         """, (user_id,))
         facebook_pages = serialize_records(cursor.fetchall())
 
-        # Fetch YouTube channels
+        # Fetch YouTube channels - ADDED NEW FIELDS
         cursor.execute("""
             SELECT id, username, email, channel_id, google_drive_link, sch_start_range, 
-                   sch_end_range, number_of_posts, posts_left, selected
+                   sch_end_range, number_of_posts, posts_left, selected,
+                   post_daily_range, post_daily_range_left, last_reset  -- ADDED THESE
             FROM youtube WHERE user_id = %s
         """, (user_id,))
         youtube_channels = serialize_records(cursor.fetchall())

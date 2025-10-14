@@ -30,7 +30,8 @@ const AccountsScreen: React.FC = () => {
     google_drive_link: '',
     sch_start_range: '09:00:00',
     sch_end_range: '17:00:00',
-    number_of_posts: '5',
+    // RENAMED: Changed from number_of_posts to post_daily_range
+    post_daily_range: '5',
     channel_id: '',
   });
   const [user, setUser] = useState<User | null>(null);
@@ -49,11 +50,13 @@ const AccountsScreen: React.FC = () => {
       }
       const response = await ApiService.getUser(userData.Id);
       setUser(response.user);
+      // NOTE: The API MUST be updated to fetch post_daily_range and post_daily_range_left for this to work
       setInstagramAccounts(response.instagram_accounts || []);
       setTelegramAccounts(response.telegram_channels || []);
       setYoutubeAccounts(response.youtube_channels || []);
     } catch (error: any) {
       console.error('Error loading accounts:', error.response?.data?.error || error.message);
+      // Error message will likely show "Unknown column 'post_daily_range_left'" if the Python API hasn't been deployed yet.
       Alert.alert('Error', error.response?.data?.error || 'Failed to load accounts. Check server or network.');
     }
   };
@@ -74,7 +77,7 @@ const AccountsScreen: React.FC = () => {
       google_drive_link: '',
       sch_start_range: '09:00:00',
       sch_end_range: '17:00:00',
-      number_of_posts: '5',
+      post_daily_range: '5', // UPDATED
       channel_id: '',
     });
     setModalVisible(true);
@@ -87,19 +90,27 @@ const AccountsScreen: React.FC = () => {
         Alert.alert('Error', 'Please enter valid time in HH:MM:SS format (e.g., 09:00:00)');
         return;
       }
-      if (isNaN(parseInt(formData.number_of_posts)) || parseInt(formData.number_of_posts) <= 0) {
-        Alert.alert('Error', 'Number of posts must be a positive number');
+      
+      // UPDATED VALIDATION LOGIC: Use post_daily_range
+      if (isNaN(parseInt(formData.post_daily_range)) || parseInt(formData.post_daily_range) < 0) {
+        Alert.alert('Error', 'No. of Posts Daily must be a non-negative number');
         return;
       }
 
       const commonData = {
         email: formData.email,
-        google_drive_link: formData.google_drive_link, // Use the correct database column name
+        google_drive_link: formData.google_drive_link,
         sch_start_range: formData.sch_start_range,
         sch_end_range: formData.sch_end_range,
-        number_of_posts: parseInt(formData.number_of_posts),
-        posts_left: parseInt(formData.number_of_posts),
-        token_sesson: "{}", // Matches backend expectation
+        
+        // CHANGED: Send post_daily_range to the API
+        post_daily_range: parseInt(formData.post_daily_range),
+        
+        // Send old fields with 0 for backward compatibility/deprecation
+        number_of_posts: 0, 
+        posts_left: 0,
+        
+        token_sesson: "{}", 
       };
 
       switch (modalType) {
@@ -138,7 +149,7 @@ const AccountsScreen: React.FC = () => {
             username: formData.username,
             channel_id: formData.channel_id,
             ...commonData,
-          });
+          } as any);
           Alert.alert('Success', 'YouTube channel added successfully!');
           break;
       }
@@ -186,37 +197,70 @@ const AccountsScreen: React.FC = () => {
   };
 
   const isInTimeRange = (startTime: string, endTime: string) => {
-    const now = new Date();
-    const currentTime = now.getHours() * 3600 + now.getMinutes() * 60 + now.getSeconds();
-    
-    const [startHours, startMinutes, startSeconds] = startTime.split(':').map(Number);
-    const [endHours, endMinutes, endSeconds] = endTime.split(':').map(Number);
-    
-    const startTimeInSeconds = startHours * 3600 + startMinutes * 60 + startSeconds;
-    const endTimeInSeconds = endHours * 3600 + endMinutes * 60 + endSeconds;
-    
-    return currentTime >= startTimeInSeconds && currentTime <= endTimeInSeconds;
+    // FINAL FIX: Use UTC time and apply IST offset (+5:30) to get current IST hour/minute/second
+    // This ensures consistency with the Python backend configured to Asia/Kolkata (IST).
+    try {
+      const now = new Date();
+      
+      // Calculate current IST time in seconds from midnight
+      const IST_OFFSET_SECONDS = 5 * 3600 + 30 * 60;
+      // Get UTC seconds, apply IST offset, and wrap within 24 hours
+      let currentTime = (now.getUTCHours() * 3600 + now.getUTCMinutes() * 60 + now.getUTCSeconds() + IST_OFFSET_SECONDS) % (24 * 3600);
+      
+      const [startHours, startMinutes, startSeconds] = startTime.split(':').map(Number);
+      const [endHours, endMinutes, endSeconds] = endTime.split(':').map(Number);
+      
+      const startTimeInSeconds = startHours * 3600 + startMinutes * 60 + startSeconds;
+      let endTimeInSeconds = endHours * 3600 + endMinutes * 60 + endSeconds;
+      
+      // Handle overnight range (e.g., 22:00:00 - 05:00:00)
+      if (endTimeInSeconds < startTimeInSeconds) {
+          endTimeInSeconds += 24 * 3600; // Add 24 hours to the end time
+          
+          // Wrap current time only if it's past midnight (i.e., less than start time but IST is in the range)
+          if (currentTime < startTimeInSeconds) {
+              currentTime += 24 * 3600; 
+          }
+      }
+      
+      return currentTime >= startTimeInSeconds && currentTime <= endTimeInSeconds;
+    } catch (e) {
+      console.error("Error calculating time range:", e);
+      return true; // Default to active if range is invalid
+    }
   };
 
   const getAccountStatus = (account: any) => {
     const isInactiveBySelection = account.selected === 'No';
     const isOutsideTimeRange = !isInTimeRange(account.sch_start_range, account.sch_end_range);
-    const hasNoPosts = account.posts_left <= 0;
     
-    const isInactive = isInactiveBySelection || isOutsideTimeRange || hasNoPosts;
+    // NEW LOGIC: Check post_daily_range_left
+    const hasDailyLimitReached = (
+        (account.post_daily_range !== undefined && account.post_daily_range > 0) &&
+        (account.post_daily_range_left !== undefined && account.post_daily_range_left <= 0)
+    );
+    
+    // Check if the old number_of_posts is also 0 (just to be safe, though daily is prioritized)
+    const hasNoTotalPostsLeft = account.posts_left !== undefined && account.posts_left <= 0;
+    
+    // The account is inactive if selected = No OR outside time OR daily posts limit reached.
+    const isInactive = isInactiveBySelection || isOutsideTimeRange || hasDailyLimitReached || hasNoTotalPostsLeft;
     
     let statusText = 'Active';
-    let statusColor = '#34C759';
-    
-    if (hasNoPosts) {
-      statusText = 'No Posts';
-      statusColor = '#FF9500';
+    let statusColor = '#34C759'; // Green
+
+    if (isInactiveBySelection) {
+      statusText = 'Inactive';
+      statusColor = '#FF3B30'; // Red
+    } else if (hasDailyLimitReached) {
+      statusText = 'Daily Limit Reached';
+      statusColor = '#FF9500'; // Orange
     } else if (isOutsideTimeRange) {
       statusText = 'Outside Hours';
-      statusColor = '#FF9500';
-    } else if (isInactiveBySelection) {
-      statusText = 'Inactive';
-      statusColor = '#FF3B30';
+      statusColor = '#FF9500'; // Orange
+    } else if (hasNoTotalPostsLeft) {
+      statusText = 'All Posts Used';
+      statusColor = '#FF3B30'; // Red
     }
     
     return {
@@ -224,7 +268,7 @@ const AccountsScreen: React.FC = () => {
       statusText,
       statusColor,
       isOutsideTimeRange,
-      hasNoPosts,
+      hasDailyLimitReached,
       isInactiveBySelection,
     };
   };
@@ -232,6 +276,15 @@ const AccountsScreen: React.FC = () => {
   const AccountCard = ({ account, platform }: { account: any; platform: 'instagram' | 'telegram' | 'youtube' }) => {
     const status = getAccountStatus(account);
     
+    // NEW: Use post_daily_range/post_daily_range_left
+    // Use 'N/A' if the field is undefined (e.g., if API didn't return it)
+    const postsLeftDaily = account.post_daily_range_left !== undefined ? account.post_daily_range_left : 'N/A';
+    const totalPostsDaily = account.post_daily_range !== undefined ? account.post_daily_range : 'N/A';
+    
+    // Fallback/Legacy total posts display
+    const postsLeft = account.posts_left !== undefined ? account.posts_left : 'N/A';
+    const totalPosts = account.number_of_posts !== undefined ? account.number_of_posts : 'N/A';
+
     return (
       <View style={[
         styles.accountCard,
@@ -260,11 +313,12 @@ const AccountsScreen: React.FC = () => {
         
         <View style={styles.accountDetails}>
           <View style={styles.detailRow}>
+            {/* UPDATED: Display Daily Posts Stat */}
             <Text style={[
               styles.accountInfo,
               status.isInactive && styles.inactiveText
             ]}>
-              <Icon name="bar-chart" size={14} color={status.isInactive ? '#999' : '#666'} /> Posts: {account.posts_left}/{account.number_of_posts}
+              <Icon name="bar-chart" size={14} color={status.isInactive ? '#999' : '#666'} /> Posts Daily: {postsLeftDaily}/{totalPostsDaily}
             </Text>
             <Text style={[
               styles.accountInfo,
@@ -273,6 +327,16 @@ const AccountsScreen: React.FC = () => {
               <Icon name="schedule" size={14} color={status.isInactive ? '#999' : '#666'} /> {account.sch_start_range} - {account.sch_end_range}
             </Text>
           </View>
+          {/* Optional: Show total posts left if it's still being tracked */}
+          {account.number_of_posts > 0 && (
+              <Text style={[
+                styles.accountInfo,
+                status.isInactive && styles.inactiveText,
+                { marginTop: 4 }
+              ]}>
+                <Icon name="layers" size={14} color={status.isInactive ? '#999' : '#666'} /> Total Posts Left: {postsLeft}/{totalPosts}
+              </Text>
+          )}
         </View>
 
         <View style={styles.accountActions}>
@@ -473,9 +537,10 @@ const AccountsScreen: React.FC = () => {
                 <Icon name="format-list-numbered" size={20} color="#666" style={styles.inputIcon} />
                 <TextInput
                   style={styles.input}
-                  value={formData.number_of_posts}
-                  onChangeText={(text) => setFormData({ ...formData, number_of_posts: text })}
-                  placeholder="Number of Posts *"
+                  // CHANGED: Use post_daily_range
+                  value={formData.post_daily_range}
+                  onChangeText={(text) => setFormData({ ...formData, post_daily_range: text })}
+                  placeholder="No. of Posts Daily *" // UPDATED LABEL
                   keyboardType="numeric"
                 />
               </View>

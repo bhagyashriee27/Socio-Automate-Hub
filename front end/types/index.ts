@@ -32,7 +32,7 @@ export interface InstagramAccount {
   username: string;
   passwand?: string; // Matches DB typo
   email: string;
-   token_sesson?: string; // Add this line
+  token_sesson?: string;
   google_drive_link: string;
   selected: 'Yes' | 'No';
   sch_start_range: string;
@@ -41,6 +41,10 @@ export interface InstagramAccount {
   posts_left: number;
   done: 'Yes' | 'No';
   next_post_time?: string;
+  // ADD THESE NEW FIELDS:
+  post_daily_range: number;
+  post_daily_range_left: number;
+  last_reset?: string;
 }
 
 export interface TelegramAccount {
@@ -56,8 +60,11 @@ export interface TelegramAccount {
   number_of_posts: number;
   posts_left: number;
   done: 'Yes' | 'No';
-  
   next_post_time?: string;
+  // ADD THESE NEW FIELDS:
+  post_daily_range: number;
+  post_daily_range_left: number;
+  last_reset?: string;
 }
 
 export interface FacebookAccount {
@@ -70,7 +77,6 @@ export interface FacebookAccount {
   token_sesson: string;
   selected: 'Yes' | 'No';
   google_drive_link: string;
-  
   sch_start_range: string;
   sch_end_range: string;
   sch_date?: string;
@@ -80,6 +86,10 @@ export interface FacebookAccount {
   done: 'Yes' | 'No';
   schedule_type: 'range' | 'datetime';
   next_post_time?: string;
+  // ADD THESE NEW FIELDS:
+  post_daily_range: number;
+  post_daily_range_left: number;
+  last_reset?: string;
 }
 
 export interface YouTubeAccount {
@@ -92,12 +102,16 @@ export interface YouTubeAccount {
   sch_start_range: string;
   sch_end_range: string;
   number_of_posts: number;
-  token_sesson: string; // Add this line
+  token_sesson: string;
   channel_id: string;
   posts_left: number;
   done: 'Yes' | 'No';
   next_post_time?: string;
-  token_drive: string; // Optional Google Drive link for tokens
+  token_drive: string;
+  // ADD THESE NEW FIELDS:
+  post_daily_range: number;
+  post_daily_range_left: number;
+  last_reset?: string;
 }
 
 // API Response types
@@ -105,8 +119,8 @@ export interface ApiResponse<T = any> {
   message?: string;
   error?: string;
   data?: T & { file_id?: string };
-  token_sesson?: string; // Add this line // Added file_id for upload response
-  file_id?: string; // Add this line
+  token_sesson?: string;
+  file_id?: string;
 }
 
 // Navigation types
@@ -114,7 +128,7 @@ export type RootStackParamList = {
   Login: undefined;
   Signup: undefined;
   Main: undefined;
-  ForgotPassword: undefined; // Add this line
+  ForgotPassword: undefined;
 };
 
 export type MainTabParamList = {
@@ -132,7 +146,7 @@ export interface DashboardData {
   postsToday: number;
   recentPosts: RecentPost[];
 }
-// Add this to your existing types.ts file
+
 export interface UploadResponse extends ApiResponse {
   success?: boolean;
   file_id?: string;
@@ -144,6 +158,7 @@ export interface UploadResponse extends ApiResponse {
   upload_id?: string;
   status?: string;
 }
+
 export interface RecentPost {
   id: number;
   platform: 'instagram' | 'telegram' | 'facebook' | 'youtube';
@@ -159,4 +174,6 @@ export interface ScheduleRequest {
   start_time: string;
   end_time: string;
   number_of_posts: number;
+  // ADD OPTIONAL NEW FIELD:
+  post_daily_range?: number;
 }

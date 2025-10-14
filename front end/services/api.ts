@@ -48,6 +48,13 @@ api.interceptors.response.use(
   }
 );
 
+// Define a type for the new data structure used in add operations
+type DailyPostData = {
+    post_daily_range: number;
+    number_of_posts: number;
+    posts_left: number;
+}
+
 export class ApiService {
   // Authentication
   static async login(credentials: LoginRequest): Promise<AuthResponse> {
@@ -90,23 +97,33 @@ export class ApiService {
     }
   }
 
-  static async addInstagramAccount(accountData: Partial<InstagramAccount>): Promise<ApiResponse> {
+  // UPDATED: Use post_daily_range and deprecate number_of_posts/posts_left
+  static async addInstagramAccount(accountData: Partial<InstagramAccount> & DailyPostData): Promise<ApiResponse> {
     try {
-      const response: AxiosResponse<ApiResponse> = await api.post('/instagram', accountData);
+      const payload = {
+        ...accountData,
+        post_daily_range: accountData.post_daily_range,
+        number_of_posts: 0, // Deprecated, set to 0
+        posts_left: 0, // Deprecated, set to 0
+      };
+      const response: AxiosResponse<ApiResponse> = await api.post('/instagram', payload);
       return response.data;
     } catch (error: any) {
       throw new Error(error.response?.data?.error || 'Failed to add Instagram account');
     }
   }
 
-  static async updateInstagramAccount(id: number, accountData: Partial<InstagramAccount>): Promise<ApiResponse> {
-    try {
-      const response: AxiosResponse<ApiResponse> = await api.patch(`/instagram/${id}`, accountData);
-      return response.data;
-    } catch (error: any) {
-      throw new Error(error.response?.data?.error || 'Failed to update Instagram account');
-    }
+  static async updateInstagramAccount(id: number, accountData: Partial<InstagramAccount> & { 
+  post_daily_range?: number;
+  number_of_posts?: number;
+}): Promise<ApiResponse> {
+  try {
+    const response: AxiosResponse<ApiResponse> = await api.patch(`/instagram/${id}`, accountData);
+    return response.data;
+  } catch (error: any) {
+    throw new Error(error.response?.data?.error || 'Failed to update Instagram account');
   }
+}
 
   static async deleteInstagramAccount(id: number): Promise<ApiResponse> {
     try {
@@ -127,23 +144,35 @@ export class ApiService {
     }
   }
 
-  static async addTelegramAccount(accountData: Partial<TelegramAccount>): Promise<ApiResponse> {
+  // UPDATED: Use post_daily_range and deprecate number_of_posts/posts_left
+  static async addTelegramAccount(accountData: Partial<TelegramAccount> & DailyPostData): Promise<ApiResponse> {
     try {
-      const response: AxiosResponse<ApiResponse> = await api.post('/telegram', accountData);
+      const payload = {
+        ...accountData,
+        post_daily_range: accountData.post_daily_range,
+        number_of_posts: 0, // Deprecated, set to 0
+        posts_left: 0, // Deprecated, set to 0
+      };
+      const response: AxiosResponse<ApiResponse> = await api.post('/telegram', payload);
       return response.data;
     } catch (error: any) {
       throw new Error(error.response?.data?.error || 'Failed to add Telegram account');
     }
   }
 
-  static async updateTelegramAccount(id: number, accountData: Partial<TelegramAccount>): Promise<ApiResponse> {
-    try {
-      const response: AxiosResponse<ApiResponse> = await api.patch(`/telegram/${id}`, accountData);
-      return response.data;
-    } catch (error: any) {
-      throw new Error(error.response?.data?.error || 'Failed to update Telegram account');
-    }
+  // ✅ UPDATED: Added google_drive_link support
+  static async updateTelegramAccount(id: number, accountData: Partial<TelegramAccount> & { 
+  post_daily_range?: number;
+  number_of_posts?: number;
+  google_drive_link?: string;
+}): Promise<ApiResponse> {
+  try {
+    const response: AxiosResponse<ApiResponse> = await api.patch(`/telegram/${id}`, accountData);
+    return response.data;
+  } catch (error: any) {
+    throw new Error(error.response?.data?.error || 'Failed to update Telegram account');
   }
+}
 
   static async deleteTelegramAccount(id: number): Promise<ApiResponse> {
     try {
@@ -183,23 +212,39 @@ export class ApiService {
   }
 
   // YouTube Accounts
-  static async addYouTubeAccount(accountData: Partial<YouTubeAccount>): Promise<ApiResponse> {
+  // UPDATED: Use post_daily_range and deprecate number_of_posts/posts_left
+  static async addYouTubeAccount(accountData: Partial<YouTubeAccount> & DailyPostData): Promise<ApiResponse> {
     try {
-      const response: AxiosResponse<ApiResponse> = await api.post('/youtube', accountData);
+      const payload = {
+        ...accountData,
+        post_daily_range: accountData.post_daily_range,
+        number_of_posts: 0, // Deprecated, set to 0
+        posts_left: 0, // Deprecated, set to 0
+      };
+      const response: AxiosResponse<ApiResponse> = await api.post('/youtube', payload);
       return response.data;
     } catch (error: any) {
       throw new Error(error.response?.data?.error || 'Failed to add YouTube account');
     }
   }
 
-  static async updateYouTubeAccount(id: number, accountData: Partial<YouTubeAccount>): Promise<ApiResponse> {
-    try {
-      const response: AxiosResponse<ApiResponse> = await api.patch(`/youtube/${id}`, accountData);
-      return response.data;
-    } catch (error: any) {
-      throw new Error(error.response?.data?.error || 'Failed to update YouTube account');
-    }
+  // ✅ UPDATED: Added post_daily_range support for YouTube
+  static async updateYouTubeAccount(id: number, accountData: Partial<YouTubeAccount> & { 
+  post_daily_range?: number;
+  number_of_posts?: number;
+  google_drive_link?: string;
+  sch_start_range?: string;
+  sch_end_range?: string;
+  selected?: 'Yes' | 'No';
+}): Promise<ApiResponse> {
+  try {
+    const response: AxiosResponse<ApiResponse> = await api.patch(`/youtube/${id}`, accountData);
+    return response.data;
+  } catch (error: any) {
+    console.error('YouTube update error:', error.response?.data);
+    throw new Error(error.response?.data?.error || 'Failed to update YouTube account');
   }
+}
 
   static async deleteYouTubeAccount(id: number): Promise<ApiResponse> {
     try {
@@ -221,6 +266,7 @@ export class ApiService {
   }
 
   // Delete media from Google Drive and schedule
+  // ✅ UPDATED: Added youtube platform support
   static async deleteMediaFromDrive(
     platform: 'instagram' | 'telegram' | 'facebook' | 'youtube',
     accountId: number,
@@ -241,6 +287,7 @@ export class ApiService {
   }
 
   // Update individual media schedule
+  // ✅ UPDATED: Added youtube platform support
   static async updateMediaSchedule(
     platform: 'instagram' | 'telegram' | 'facebook' | 'youtube',
     accountId: number,
@@ -259,6 +306,7 @@ export class ApiService {
   }
 
   // Update custom schedule data (entire schedule array)
+  // ✅ UPDATED: Added youtube platform support
   static async updateCustomSchedule(
     platform: 'instagram' | 'telegram' | 'facebook' | 'youtube',
     accountId: number,
@@ -275,6 +323,7 @@ export class ApiService {
   }
 
   // Get custom schedule data
+  // ✅ UPDATED: Added youtube platform support
   static async getCustomSchedule(
     platform: 'instagram' | 'telegram' | 'facebook' | 'youtube',
     accountId: number
@@ -381,6 +430,7 @@ export class ApiService {
   }
 
   // Schedule Management
+  // ✅ UPDATED: Added youtube platform support
   static async resetSchedule(platform: 'instagram' | 'telegram' | 'facebook' | 'youtube' | 'both'): Promise<ApiResponse> {
     try {
       const response: AxiosResponse<ApiResponse> = await api.post('/schedule/reset', {
@@ -428,6 +478,7 @@ export class ApiService {
     }
   }
 
+  // ✅ UPDATED: Added youtube platform support
   static async getScheduleStatus(platform: 'instagram' | 'telegram' | 'facebook' | 'youtube' | 'both', email?: string): Promise<any> {
     try {
       const params: any = { platform };
@@ -440,6 +491,24 @@ export class ApiService {
     }
   }
 
+
+  static async updateScheduleAccount(
+  platform: 'instagram' | 'telegram' | 'youtube' | 'facebook',
+  recordId: number,
+  updateData: any
+): Promise<ApiResponse> {
+  try {
+    const response: AxiosResponse<ApiResponse> = await api.patch('/schedule/update-account', {
+      platform,
+      record_id: recordId,
+      update_data: updateData
+    });
+    return response.data;
+  } catch (error: any) {
+    throw new Error(error.response?.data?.error || 'Failed to update account');
+  }
+}
+  // ✅ UPDATED: Added youtube platform support
   static async addPosts(platform: 'instagram' | 'telegram' | 'facebook' | 'youtube', recordId: number, additionalPosts: number): Promise<ApiResponse> {
     try {
       const response: AxiosResponse<ApiResponse> = await api.post('/posts/add', {

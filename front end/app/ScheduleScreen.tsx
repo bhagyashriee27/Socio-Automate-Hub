@@ -19,12 +19,13 @@ import Ionicons from 'react-native-vector-icons/Ionicons';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import ApiService from '../services/api';
 import StorageService from '../utils/storage';
-import { InstagramAccount, TelegramAccount, User } from '../types';
+import { InstagramAccount, TelegramAccount, YouTubeAccount, User } from '../types';
 
 const ScheduleScreen: React.FC = () => {
     const [user, setUser] = useState<User | null>(null);
     const [instagramAccounts, setInstagramAccounts] = useState<InstagramAccount[]>([]);
     const [telegramAccounts, setTelegramAccounts] = useState<TelegramAccount[]>([]);
+    const [youtubeAccounts, setYoutubeAccounts] = useState<YouTubeAccount[]>([]);
     const [refreshing, setRefreshing] = useState(false);
     const [loading, setLoading] = useState(true);
     const [modalVisible, setModalVisible] = useState(false);
@@ -36,7 +37,7 @@ const ScheduleScreen: React.FC = () => {
         google_drive_link: '',
         sch_start_range: '',
         sch_end_range: '',
-        number_of_posts: 0, 
+        post_daily_range: 0,
         selected: 'No' as 'Yes' | 'No',
     });
 
@@ -55,9 +56,8 @@ const ScheduleScreen: React.FC = () => {
     // Date/Time Picker States
     const [showDatePicker, setShowDatePicker] = useState(false);
     const [showTimePicker, setShowTimePicker] = useState(false);
-    // Use a date object that combines date and time, defaulting to now
     const [selectedDate, setSelectedDate] = useState(new Date()); 
-    const [selectedTime, setSelectedTime] = useState(new Date()); // Separate state for time picker control
+    const [selectedTime, setSelectedTime] = useState(new Date());
 
     // Delete confirmation modal
     const [deleteModalVisible, setDeleteModalVisible] = useState(false);
@@ -89,6 +89,7 @@ const ScheduleScreen: React.FC = () => {
 
             setInstagramAccounts(response.instagram_accounts || []);
             setTelegramAccounts(response.telegram_channels || []);
+            setYoutubeAccounts(response.youtube_channels || []);
 
         } catch (error: any) {
             console.error('API Error Details:', {
@@ -110,7 +111,7 @@ const ScheduleScreen: React.FC = () => {
         }
     };
 
-    const loadScheduledMedia = async (account: any, platform: 'instagram' | 'telegram') => {
+    const loadScheduledMedia = async (account: any, platform: 'instagram' | 'telegram' | 'youtube') => {
         try {
             setSelectedAccountForDatetime({ ...account, platform });
 
@@ -187,23 +188,19 @@ const ScheduleScreen: React.FC = () => {
     };
 
     const openMediaEdit = (media: any) => {
-        // 1. Close the parent modal (Media Grid) immediately
         setDatetimeModalVisible(false); 
         
-        // 2. Set the media data
         setSelectedMedia(media);
 
         let initialDate = new Date();
         
         if (media.scheduled_datetime) {
-            // Use 'T' replace trick for ISO format compatibility across browsers/platforms
             const dateTime = new Date(media.scheduled_datetime.replace(' ', 'T')); 
             if (!isNaN(dateTime.getTime())) {
                 initialDate = dateTime;
             }
         }
         
-        // Set date/time state to the media's current schedule
         setSelectedDate(initialDate);
         setSelectedTime(initialDate);
 
@@ -213,7 +210,6 @@ const ScheduleScreen: React.FC = () => {
             caption: media.caption || '', 
         });
         
-        // 3. Use a slight delay before opening the new modal to allow iOS to dismiss the parent
         setTimeout(() => {
             setMediaModalVisible(true);
         }, 350); 
@@ -223,7 +219,6 @@ const ScheduleScreen: React.FC = () => {
         setMediaFormData(prev => ({
             ...prev,
             schedule_type: scheduleType,
-            // Clear scheduled_datetime if switching to range
             scheduled_datetime: scheduleType === 'range' ? '' : prev.scheduled_datetime, 
         }));
     };
@@ -257,14 +252,13 @@ const ScheduleScreen: React.FC = () => {
     const onDateChange = (event: any, date?: Date) => {
         setShowDatePicker(false);
         if (date) {
-            // Create a new date object, combining the new date with the *current* time
             const newDateTime = new Date(date);
             newDateTime.setHours(selectedTime.getHours());
             newDateTime.setMinutes(selectedTime.getMinutes());
             newDateTime.setSeconds(0);
             
             setSelectedDate(newDateTime);
-            setSelectedTime(newDateTime); // Keep time state in sync
+            setSelectedTime(newDateTime);
             
             const formattedDateTime = formatAPIDateTime(newDateTime);
             setMediaFormData(prev => ({...prev, scheduled_datetime: formattedDateTime}));
@@ -274,14 +268,13 @@ const ScheduleScreen: React.FC = () => {
     const onTimeChange = (event: any, time?: Date) => {
         setShowTimePicker(false);
         if (time) {
-            // Create a new date object, combining the *current* date with the new time
             const newDateTime = new Date(selectedDate);
             newDateTime.setHours(time.getHours());
             newDateTime.setMinutes(time.getMinutes());
             newDateTime.setSeconds(0);
 
             setSelectedTime(newDateTime);
-            setSelectedDate(newDateTime); // Keep date state in sync
+            setSelectedDate(newDateTime);
             
             const formattedDateTime = formatAPIDateTime(newDateTime);
             setMediaFormData(prev => ({...prev, scheduled_datetime: formattedDateTime}));
@@ -324,8 +317,8 @@ const ScheduleScreen: React.FC = () => {
     };
 
     const getAccountStatus = (account: any) => {
-        const postsLeft = parseInt(account.posts_left) || 0;
-        const totalPosts = parseInt(account.number_of_posts) || 0;
+        const postsLeft = parseInt(account.post_daily_range_left) || 0;
+        const totalPosts = parseInt(account.post_daily_range) || 0;
         const isInactive = postsLeft <= 0;
 
         return {
@@ -336,7 +329,7 @@ const ScheduleScreen: React.FC = () => {
         };
     };
 
-    const openEditModal = (account: any, platform: 'instagram' | 'telegram') => {
+    const openEditModal = (account: any, platform: 'instagram' | 'telegram' | 'youtube') => {
         setEditingAccount({ ...account, platform });
         setFormData({
             username: account.username || '',
@@ -345,13 +338,13 @@ const ScheduleScreen: React.FC = () => {
             google_drive_link: account.google_drive_link || '',
             sch_start_range: account.sch_start_range || '',
             sch_end_range: account.sch_end_range || '',
-            number_of_posts: parseInt(account.number_of_posts) || 0,
+            post_daily_range: parseInt(account.post_daily_range) || 0,
             selected: account.selected || 'No',
         });
         setModalVisible(true);
     };
 
-    const deleteAccount = async (accountId: string, platform: 'instagram' | 'telegram') => {
+    const deleteAccount = async (accountId: string, platform: 'instagram' | 'telegram' | 'youtube') => {
         Alert.alert(
             'Delete Account',
             'Are you sure you want to delete this account?',
@@ -365,9 +358,12 @@ const ScheduleScreen: React.FC = () => {
                             if (platform === 'instagram') {
                                 await ApiService.deleteInstagramAccount(parseInt(accountId));
                                 setInstagramAccounts(prev => prev.filter(acc => acc.id.toString() !== accountId.toString()));
-                            } else {
+                            } else if (platform === 'telegram') {
                                 await ApiService.deleteTelegramAccount(parseInt(accountId));
                                 setTelegramAccounts(prev => prev.filter(acc => acc.id.toString() !== accountId.toString()));
+                            } else if (platform === 'youtube') {
+                                await ApiService.deleteYouTubeAccount(parseInt(accountId));
+                                setYoutubeAccounts(prev => prev.filter(acc => acc.id.toString() !== accountId.toString()));
                             }
                             Alert.alert('Success', 'Account deleted successfully!');
                         } catch (error: any) {
@@ -384,21 +380,37 @@ const ScheduleScreen: React.FC = () => {
         if (!editingAccount) return;
 
         try {
+            const updateData = {
+                ...formData,
+                post_daily_range: formData.post_daily_range,
+                number_of_posts: 0,
+                posts_left: 0,
+            };
+
             if (editingAccount.platform === 'instagram') {
-                await ApiService.updateInstagramAccount(editingAccount.id, formData);
+                await ApiService.updateInstagramAccount(editingAccount.id, updateData);
                 setInstagramAccounts(prev =>
                     prev.map(acc =>
                         acc.id === editingAccount.id
-                            ? { ...acc, ...formData }
+                            ? { ...acc, ...updateData }
                             : acc
                     )
                 );
-            } else {
-                await ApiService.updateTelegramAccount(editingAccount.id, formData);
+            } else if (editingAccount.platform === 'telegram') {
+                await ApiService.updateTelegramAccount(editingAccount.id, updateData);
                 setTelegramAccounts(prev =>
                     prev.map(acc =>
                         acc.id === editingAccount.id
-                            ? { ...acc, ...formData }
+                            ? { ...acc, ...updateData }
+                            : acc
+                    )
+                );
+            } else if (editingAccount.platform === 'youtube') {
+                await ApiService.updateYouTubeAccount(editingAccount.id, updateData);
+                setYoutubeAccounts(prev =>
+                    prev.map(acc =>
+                        acc.id === editingAccount.id
+                            ? { ...acc, ...updateData }
                             : acc
                     )
                 );
@@ -501,10 +513,19 @@ const ScheduleScreen: React.FC = () => {
 
     };
 
-    const AccountCard: React.FC<{ account: any; platform: 'instagram' | 'telegram' }> = ({ account, platform }) => {
+    const AccountCard: React.FC<{ account: any; platform: 'instagram' | 'telegram' | 'youtube' }> = ({ account, platform }) => {
         const status = getAccountStatus(account);
-        const postsLeft = parseInt(account.posts_left) || 0;
-        const totalPosts = parseInt(account.number_of_posts) || 0;
+        const postsLeft = parseInt(account.post_daily_range_left) || 0;
+        const totalPosts = parseInt(account.post_daily_range) || 0;
+
+        // Get platform-specific icons and names
+        const platformConfig = {
+            instagram: { icon: 'logo-instagram', color: '#E1306C', name: 'Instagram' },
+            telegram: { icon: 'paper-plane', color: '#0088CC', name: 'Telegram' },
+            youtube: { icon: 'logo-youtube', color: '#FF0000', name: 'YouTube' }
+        };
+
+        const config = platformConfig[platform];
 
         return (
             <View style={[
@@ -517,7 +538,9 @@ const ScheduleScreen: React.FC = () => {
                             styles.accountName,
                             status.isInactive && styles.inactiveAccountName
                         ]}>
-                            {platform === 'instagram' ? account.username : account.channel_name}
+                            {platform === 'instagram' ? account.username : 
+                             platform === 'telegram' ? account.channel_name : 
+                             account.username}
                         </Text>
                         <View style={[styles.statusBadge, { backgroundColor: status.statusColor }]}>
                             <Ionicons name={status.statusIcon} size={14} color="#fff" style={styles.statusIcon} />
@@ -533,6 +556,17 @@ const ScheduleScreen: React.FC = () => {
                     ]}>
                         <Ionicons name="mail" size={14} color={status.isInactive ? '#6B7280' : '#1C2526'} /> {account.email}
                     </Text>
+                    
+                    {/* YouTube Channel ID */}
+                    {platform === 'youtube' && account.channel_id && (
+                        <Text style={[
+                            styles.detailText,
+                            status.isInactive && styles.inactiveText
+                        ]}>
+                            <Ionicons name="videocam" size={14} color={status.isInactive ? '#6B7280' : '#1C2526'} /> Channel: {account.channel_id}
+                        </Text>
+                    )}
+                    
                     <View style={styles.detailRow}>
                         <Text style={[
                             styles.detailText,
@@ -544,7 +578,7 @@ const ScheduleScreen: React.FC = () => {
                             styles.detailText,
                             status.isInactive && styles.inactiveText
                         ]}>
-                            <Ionicons name="stats-chart" size={14} color={status.isInactive ? '#6B7280' : '#1C2526'} /> {postsLeft}/{totalPosts} posts
+                            <Ionicons name="stats-chart" size={14} color={status.isInactive ? '#6B7280' : '#1C2526'} /> {postsLeft}/{totalPosts} posts daily
                         </Text>
                     </View>
 
@@ -565,7 +599,7 @@ const ScheduleScreen: React.FC = () => {
                         onPress={() => loadScheduledMedia(account, platform)}
                     >
                         <Ionicons name="calendar" size={14} color="#fff" />
-                        <Text style={styles.scheduleButtonText}> schedule_post</Text>
+                        <Text style={styles.scheduleButtonText}> Schedule</Text>
                     </TouchableOpacity>
 
                     <TouchableOpacity
@@ -649,9 +683,30 @@ const ScheduleScreen: React.FC = () => {
                         ))
                     )}
                 </View>
+
+                {/* YouTube Accounts Section */}
+                <View style={styles.section}>
+                    <View style={styles.sectionHeader}>
+                        <Text style={styles.sectionTitle}>
+                            <Ionicons name="logo-youtube" size={20} color="#FF0000" /> YouTube Channels
+                        </Text>
+                    </View>
+
+                    {youtubeAccounts.length === 0 ? (
+                        <View style={styles.emptyState}>
+                            <Ionicons name="logo-youtube" size={48} color="#6B7280" />
+                            <Text style={styles.emptyText}>No YouTube channels</Text>
+                            <Text style={styles.emptySubtext}>Add YouTube channels to start scheduling videos</Text>
+                        </View>
+                    ) : (
+                        youtubeAccounts.map(account => (
+                            <AccountCard key={account.id} account={account} platform="youtube" />
+                        ))
+                    )}
+                </View>
             </ScrollView>
 
-            {/* Account Edit Modal (Top Level Modal 1) */}
+            {/* Account Edit Modal */}
             <Modal
                 animationType="slide"
                 transparent={true}
@@ -661,7 +716,9 @@ const ScheduleScreen: React.FC = () => {
                 <View style={styles.modalOverlay}>
                     <View style={styles.modalContent}>
                         <Text style={styles.modalTitle}>
-                            Edit {editingAccount?.platform === 'instagram' ? 'Instagram Account' : 'Telegram Channel'}
+                            Edit {editingAccount?.platform === 'instagram' ? 'Instagram Account' : 
+                                  editingAccount?.platform === 'telegram' ? 'Telegram Channel' : 
+                                  'YouTube Channel'}
                         </Text>
 
                         <ScrollView style={styles.modalScroll}>
@@ -689,7 +746,7 @@ const ScheduleScreen: React.FC = () => {
                                         <Text style={styles.helperText}>Leave blank to keep current password</Text>
                                     </View>
                                 </>
-                            ) : (
+                            ) : editingAccount?.platform === 'telegram' ? (
                                 <View style={styles.inputContainer}>
                                     <Text style={styles.inputLabel}>Channel Name</Text>
                                     <TextInput
@@ -697,6 +754,16 @@ const ScheduleScreen: React.FC = () => {
                                         value={formData.channel_name}
                                         onChangeText={(text) => setFormData({ ...formData, channel_name: text })}
                                         placeholder="Enter channel name"
+                                    />
+                                </View>
+                            ) : (
+                                <View style={styles.inputContainer}>
+                                    <Text style={styles.inputLabel}>Username</Text>
+                                    <TextInput
+                                        style={styles.input}
+                                        value={formData.username}
+                                        onChangeText={(text) => setFormData({ ...formData, username: text })}
+                                        placeholder="Enter YouTube username"
                                     />
                                 </View>
                             )}
@@ -732,14 +799,15 @@ const ScheduleScreen: React.FC = () => {
                             </View>
 
                             <View style={styles.inputContainer}>
-                                <Text style={styles.inputLabel}>Number of Posts</Text>
+                                <Text style={styles.inputLabel}>Daily Post Range</Text>
                                 <TextInput
                                     style={styles.input}
-                                    value={formData.number_of_posts.toString()}
-                                    onChangeText={(text) => setFormData({ ...formData, number_of_posts: parseInt(text) || 0 })}
-                                    placeholder="Enter number of posts"
+                                    value={formData.post_daily_range.toString()}
+                                    onChangeText={(text) => setFormData({ ...formData, post_daily_range: parseInt(text) || 0 })}
+                                    placeholder="Enter daily post limit"
                                     keyboardType="numeric"
                                 />
+                                <Text style={styles.helperText}>Maximum number of posts per day</Text>
                             </View>
 
                             <View style={styles.inputContainer}>
@@ -777,7 +845,7 @@ const ScheduleScreen: React.FC = () => {
                 </View>
             </Modal>
 
-            {/* Datetime Edit Modal (Top Level Modal 2) */}
+            {/* Datetime Edit Modal */}
             <Modal
                 animationType="slide"
                 transparent={true}
@@ -793,7 +861,9 @@ const ScheduleScreen: React.FC = () => {
                             <Text style={styles.modalSubtitle}>
                                 {selectedAccountForDatetime?.platform === 'instagram'
                                     ? selectedAccountForDatetime?.username
-                                    : selectedAccountForDatetime?.channel_name}
+                                    : selectedAccountForDatetime?.platform === 'telegram'
+                                    ? selectedAccountForDatetime?.channel_name
+                                    : selectedAccountForDatetime?.username}
                             </Text>
                             <TouchableOpacity
                                 style={styles.closeButton}
@@ -825,7 +895,7 @@ const ScheduleScreen: React.FC = () => {
                 </View>
             </Modal>
 
-            {/* Media Edit Modal (Top Level Modal 3 - Accessed from Modal 2) */}
+            {/* Media Edit Modal */}
             <Modal
                 animationType="slide"
                 transparent={true}
@@ -974,8 +1044,7 @@ const ScheduleScreen: React.FC = () => {
                 </View>
             </Modal>
             
-            {/* DATE/TIME PICKERS (Rendered at root level) - FIX APPLIED HERE */}
-            
+            {/* DATE/TIME PICKERS */}
             {showDatePicker && (
                 <DateTimePicker
                     value={selectedDate}
@@ -995,7 +1064,7 @@ const ScheduleScreen: React.FC = () => {
                 />
             )}
 
-            {/* Delete Confirmation Modal (Top Level Modal 4) */}
+            {/* Delete Confirmation Modal */}
             <Modal
                 animationType="fade"
                 transparent={true}

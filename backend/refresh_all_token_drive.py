@@ -55,39 +55,47 @@ def get_db_connection():
         return None
 
 def get_all_accounts(platform):
-    """Get all accounts for a specific platform"""
+    """
+    Get ALL accounts with a Google Drive link, ensuring token fields are not NULL.
+    Sets NULL token values to the string '{}'.
+    """
     conn = get_db_connection()
     if not conn:
         return []
     
-    cursor = conn.cursor(dictionary=True)
+    # Use buffered=True to handle potential large results and ensure connection integrity
+    cursor = conn.cursor(dictionary=True, buffered=True) 
     config = PLATFORM_CONFIGS[platform]
     
-    # Different query conditions based on platform
-    if platform == 'instagram':
-        query = f"""
-            SELECT {config['id_field']}, {config['name_field']}, {config['token_field']}, google_drive_link
-            FROM {config['table']}
-            WHERE done = 'No' AND posts_left > 0
-        """
-    else:
-        # For other platforms, get all accounts that might need tokens
-        query = f"""
-            SELECT {config['id_field']}, {config['name_field']}, {config['token_field']}, google_drive_link
-            FROM {config['table']}
-            WHERE {config['token_field']} IS NOT NULL OR google_drive_link IS NOT NULL
-        """
+    # Use COALESCE in SQL to replace NULL with '{}' directly in the result set
+    token_field_coalesced = f"COALESCE({config['token_field']}, '{{}}') AS {config['token_field']}"
     
-    cursor.execute(query)
-    accounts = cursor.fetchall()
-    cursor.close()
-    conn.close()
+    # Query: Select all rows where google_drive_link is not NULL
+    query = f"""
+        SELECT {config['id_field']}, {config['name_field']}, {token_field_coalesced}, google_drive_link
+        FROM {config['table']}
+        WHERE google_drive_link IS NOT NULL 
+    """
+    
+    # Print minimized query for terminal
+    print(f"Query ({platform}): {re.sub(r'\s+', ' ', query.strip())[:100]}...")
+    
+    try:
+        cursor.execute(query)
+        accounts = cursor.fetchall()
+    except mysql.connector.Error as e:
+        print(f"ERROR: SQL execution failed for {platform}: {str(e)}")
+        accounts = []
+    finally:
+        cursor.close()
+        conn.close()
     
     # Add platform info to each account
     for account in accounts:
         account['platform'] = platform
         account['config'] = config
     
+    print(f"Retrieved {len(accounts)} relevant accounts for {platform}.")
     return accounts
 
 def update_drive_token(platform, account_id, token_json):
@@ -104,10 +112,16 @@ def update_drive_token(platform, account_id, token_json):
     conn.commit()
     cursor.close()
     conn.close()
-    print(f"Updated {config['token_field']} for {platform} account ID {account_id}")
+
+# Note: get_valid_token_from_other_account and get_valid_token_from_any_platform 
+# remain unchanged as they filter out '{}' which is the correct behavior for 
+# finding a truly *working* token.
 
 def get_valid_token_from_other_account(platform, current_account_id):
-    """Get a valid token from another account in the same platform"""
+    """
+    Get a valid token from another account in the same platform. 
+    A valid token is defined as not NULL, not empty string, and not '{}'.
+    """
     conn = get_db_connection()
     if not conn:
         return None
@@ -130,64 +144,47 @@ def get_valid_token_from_other_account(platform, current_account_id):
     conn.close()
     
     if result:
-        print(f"Found {config['token_field']} from another {platform} account.")
         return result[config['token_field']]
     
-    print(f"No valid {config['token_field']} found in other {platform} accounts.")
     return None
 
 def get_valid_token_from_any_platform(current_platform, current_account_id):
-    """Get a valid token from any platform (fallback)"""
+    """
+    Get a valid token from any platform (fallback). 
+    A valid token is defined as not NULL, not empty string, and not '{}'.
+    """
     conn = get_db_connection()
     if not conn:
         return None
     
     cursor = conn.cursor(dictionary=True)
     
-    # Try Instagram first (most likely to have tokens)
-    query = """
-        SELECT token_drive
-        FROM instagram
-        WHERE token_drive IS NOT NULL AND token_drive != '' AND token_drive != '{}'
-        LIMIT 1
-    """
-    cursor.execute(query)
-    result = cursor.fetchone()
+    platform_checks = [
+        ('instagram', 'token_drive'),
+        ('telegram', 'token_drive'),
+        ('youtube', 'token_sesson')
+    ]
     
-    if not result:
-        # Try Telegram
-        query = """
-            SELECT token_drive
-            FROM telegram
-            WHERE token_drive IS NOT NULL AND token_drive != '' AND token_drive != '{}'
+    for table, token_field in platform_checks:
+        query = f"""
+            SELECT {token_field}
+            FROM {table}
+            WHERE {token_field} IS NOT NULL AND {token_field} != '' AND {token_field} != '{{}}'
             LIMIT 1
         """
         cursor.execute(query)
         result = cursor.fetchone()
-    
-    if not result:
-        # Try YouTube (uses token_sesson)
-        query = """
-            SELECT token_sesson
-            FROM youtube
-            WHERE token_sesson IS NOT NULL AND token_sesson != '' AND token_sesson != '{}'
-            LIMIT 1
-        """
-        cursor.execute(query)
-        result = cursor.fetchone()
+        
+        if result:
+            cursor.close()
+            conn.close()
+            return result[token_field]
     
     cursor.close()
     conn.close()
-    
-    if result:
-        token_field = list(result.keys())[0]  # Get the field name
-        print(f"Found {token_field} from another platform as fallback.")
-        return result[token_field]
-    
-    print("No valid tokens found in any platform.")
     return None
 
-# --- Google Drive Functions ---
+
 def validate_credentials(creds):
     """Validate Google Drive credentials"""
     if not creds:
@@ -195,189 +192,175 @@ def validate_credentials(creds):
     
     try:
         drive_service = build('drive', 'v3', credentials=creds)
-        # Test by listing files in root (minimal operation)
         drive_service.files().list(pageSize=1, fields="files(id)").execute()
-        print("Credentials are valid.")
         return True
     except Exception as e:
-        print(f"Credentials validation failed: {str(e)}")
         return False
 
 def get_or_refresh_credentials(account, max_retries=3):
-    """Get or refresh credentials for an account"""
+    """
+    Attempt to refresh, validate, or set credentials unconditionally.
+    Returns creds, status_code, and action_performed for concise logging.
+    """
     platform = account['platform']
     config = account['config']
     account_id = account[config['id_field']]
     account_name = account[config['name_field']]
     creds = None
-    refreshed = False
-
-    # Load from database if exists
     token_field = config['token_field']
-    if account.get(token_field):
+    
+    current_token_value = account.get(token_field)
+    action = 'FAILED'
+
+    # 1. Attempt to load existing credentials (now guaranteed not NULL, might be '{}')
+    if current_token_value and current_token_value.strip() != '{}' and current_token_value.strip() != '':
         try:
-            token_str = account[token_field].strip('"').replace('\\"', '"').replace("\\'", "'")
+            token_str = current_token_value.strip('"').replace('\\"', '"').replace("\\'", "'")
             token_data = json.loads(token_str)
             creds = Credentials.from_authorized_user_info(token_data, SCOPES)
-            print(f"Loaded {token_field} from database for {platform} account {account_name}")
-        except (json.JSONDecodeError, KeyError, ValueError) as e:
-            print(f"ERROR: Invalid {token_field} for {platform} account {account_name}: {str(e)}. Treating as null.")
+            action = 'LOADED'
+
+            # Try to refresh/validate existing credentials
+            is_valid = validate_credentials(creds)
+            
+            if creds.expired and creds.refresh_token:
+                for attempt in range(max_retries):
+                    try:
+                        creds.refresh(Request())
+                        update_drive_token(platform, account_id, creds.to_json())
+                        action = 'REFRESHED'
+                        is_valid = True
+                        break
+                    except Exception:
+                        action = 'REFRESH_FAIL'
+                        sleep(1)
+            
+            if is_valid and creds:
+                action = action if action == 'REFRESHED' else 'VALIDATED'
+                return creds, 1, action
+            elif creds:
+                 # Token was present but failed validation/refresh
+                 action = 'INVALID'
+                 creds = None 
+        
+        except (json.JSONDecodeError, KeyError, ValueError):
+            action = 'MALFORMED'
             creds = None
 
-    # Try to refresh existing credentials
-    if creds:
-        if creds.expired and creds.refresh_token:
-            for attempt in range(max_retries):
-                try:
-                    creds.refresh(Request())
-                    print(f"Refreshed token for {platform} account {account_name}")
-                    update_drive_token(platform, account_id, creds.to_json())
-                    refreshed = True
-                    break
-                except Exception as e:
-                    print(f"Refresh attempt {attempt + 1}/{max_retries} failed for {platform} account {account_name}: {str(e)}")
-                    if attempt < max_retries - 1:
-                        sleep(5)
-                    else:
-                        print(f"Max retries reached for {platform} account {account_name}. Attempting alternative methods.")
-                        creds = None
-
-    # If still no creds, try copying from another account in same platform
+    # 2. Fallback: Try copying a token from another account (runs if token was '{}', NULL, or INVALID/MALFORMED)
     if not creds:
         other_token = get_valid_token_from_other_account(platform, account_id)
+        if not other_token:
+            other_token = get_valid_token_from_any_platform(platform, account_id)
+
         if other_token:
             try:
                 token_str = other_token.strip('"').replace('\\"', '"').replace("\\'", "'")
                 token_data = json.loads(token_str)
                 creds = Credentials.from_authorized_user_info(token_data, SCOPES)
                 
-                # Validate if it works
                 if validate_credentials(creds):
-                    # If expired, try refresh
+                    # Attempt refresh once, even for copied token
                     if creds.expired and creds.refresh_token:
                         try:
                             creds.refresh(Request())
-                            print(f"Refreshed copied token for {platform} account {account_name}")
-                        except Exception as e:
-                            print(f"Failed to refresh copied token: {str(e)}. Discarding.")
-                            creds = None
+                        except Exception:
+                            pass # Use as-is if refresh fails
                     
                     if creds:
                         update_drive_token(platform, account_id, creds.to_json())
-                        refreshed = True
-                        print(f"Successfully used and saved token from another {platform} account for {account_name}")
+                        action = 'COPIED_SET'
+                        return creds, 1, action
                 else:
-                    print(f"Copied token does not work. Discarding.")
+                    action = 'COPIED_BAD'
                     creds = None
-            except (json.JSONDecodeError, KeyError, ValueError) as e:
-                print(f"ERROR: Invalid copied {token_field}: {str(e)}. Skipping.")
+            except Exception:
+                action = 'COPIED_FAIL'
                 creds = None
 
-    # If still no creds, try copying from any platform (fallback)
-    if not creds:
-        other_token = get_valid_token_from_any_platform(platform, account_id)
-        if other_token:
-            try:
-                token_str = other_token.strip('"').replace('\\"', '"').replace("\\'", "'")
-                token_data = json.loads(token_str)
-                creds = Credentials.from_authorized_user_info(token_data, SCOPES)
-                
-                # Validate if it works
-                if validate_credentials(creds):
-                    # If expired, try refresh
-                    if creds.expired and creds.refresh_token:
-                        try:
-                            creds.refresh(Request())
-                            print(f"Refreshed cross-platform token for {platform} account {account_name}")
-                        except Exception as e:
-                            print(f"Failed to refresh cross-platform token: {str(e)}. Discarding.")
-                            creds = None
-                    
-                    if creds:
-                        update_drive_token(platform, account_id, creds.to_json())
-                        refreshed = True
-                        print(f"Successfully used and saved cross-platform token for {account_name}")
-                else:
-                    print(f"Cross-platform token does not work. Discarding.")
-                    creds = None
-            except (json.JSONDecodeError, KeyError, ValueError) as e:
-                print(f"ERROR: Invalid cross-platform token: {str(e)}. Skipping.")
-                creds = None
-
-    # If still no creds, attempt new authentication (requires interaction)
+    # 3. Final Fallback: Attempt new interactive authentication
     if not creds:
         if not os.path.exists('credentials.json'):
-            print(f"ERROR: credentials.json not found for {platform} account {account_name}. Skipping token creation.")
-            return None, False
+            action = 'NO_CRED_FILE'
+            return None, 0, action
         
         try:
+            # Note: This is blocking and requires manual intervention
+            print(f"--- INTERACTIVE AUTH REQUIRED for {account_name} ---")
             flow = InstalledAppFlow.from_client_secrets_file('credentials.json', SCOPES)
             creds = flow.run_local_server(port=0)
             update_drive_token(platform, account_id, creds.to_json())
-            print(f"Obtained and saved new token for {platform} account {account_name}")
-            refreshed = True
-        except Exception as e:
-            print(f"ERROR: Failed to obtain new token for {platform} account {account_name}: {str(e)}. May require manual intervention.")
-            return None, False
+            action = 'NEW_AUTH_SET'
+            return creds, 1, action
+        except Exception:
+            action = 'NEW_AUTH_FAIL'
+            return None, 0, action
 
-    return creds, refreshed
+    return None, 0, action
+
 
 def process_platform_accounts(platform):
-    """Process all accounts for a specific platform"""
-    print(f"\n=== Processing {platform.upper()} Accounts ===")
+    """Process all accounts for a specific platform and log concisely."""
+    print(f"\n--- {platform.upper()} Processing (Total: {len(get_all_accounts(platform))}) ---\n")
+    
     accounts = get_all_accounts(platform)
     
     if not accounts:
-        print(f"No active {platform} accounts found.")
+        print(f"No relevant {platform} accounts found.")
         return 0, 0
     
     processed = 0
     successful = 0
     
+    # Header for the concise output formula
+    print(f"{'| ID':<5} | {'Platform':<10} | {'Account Name':<20} | {'Status':<10} | {'Action':<15} |")
+    print("-" * 65)
+
     for account in accounts:
         name_field = PLATFORM_CONFIGS[platform]['name_field']
         id_field = PLATFORM_CONFIGS[platform]['id_field']
         account_name = account[name_field]
         account_id = account[id_field]
         
-        print(f"\nProcessing {platform} account: {account_name} (ID: {account_id})")
         processed += 1
         
-        # Handle token refresh or creation
-        creds, was_refreshed = get_or_refresh_credentials(account)
-        if creds:
+        # Unconditional attempt to get or refresh credentials
+        creds, status, action = get_or_refresh_credentials(account)
+        
+        # Determine final status for output
+        status_str = "SUCCESS" if status == 1 else "FAILED"
+        
+        # Print concise "terminal bit formula" (one line per account)
+        print(f"| {account_id:<3} | {platform:<10} | {account_name:<20} | {status_str:<10} | {action:<15} |")
+        
+        if status == 1:
             successful += 1
-            print(f"✓ Token handled successfully for {platform} account {account_name}")
-        else:
-            print(f"✗ Skipping {platform} account {account_name} due to token issues.")
     
     return processed, successful
 
 # --- Main Execution ---
 def main():
-    print("=== Multi-Platform Token Refresh Scheduler ===")
+    print("=== Multi-Platform Token Refresh Scheduler (UNCONDITIONAL RUN) ===")
     
     while True:
         total_processed = 0
         total_successful = 0
         
-        # Process each platform
+        # Process each platform (runs the logic for ALL rows in each table)
         for platform in PLATFORM_CONFIGS.keys():
             processed, successful = process_platform_accounts(platform)
             total_processed += processed
             total_successful += successful
         
-        print(f"\n=== Scheduler Run Summary ===")
-        print(f"Total accounts processed: {total_processed}")
-        print(f"Total successful: {total_successful}")
-        print(f"Failed: {total_processed - total_successful}")
+        print(f"\n\n=== Scheduler Run Summary ===")
+        print(f"Total processed: {total_processed}, Successful: {total_successful}, Failed: {total_processed - total_successful}")
         
         if total_processed > 0:
             success_rate = (total_successful / total_processed) * 100
             print(f"Success rate: {success_rate:.1f}%")
         
         print(f"\nScheduler run complete. Sleeping for {REFRESH_INTERVAL_SECONDS / 3600} hours...")
-        print("=" * 50)
+        print("=" * 65)
         sleep(REFRESH_INTERVAL_SECONDS)
 
 if __name__ == "__main__":
