@@ -294,7 +294,7 @@ def run_scheduler_once():
 
                 min_datetime = min(pending_datetime_times) if pending_datetime_times else None
                 min_range = None
-                
+                 
                 # Use post_daily_range_left for scheduling range posts
                 daily_range_posts = min(pending_range_count, post_daily_range_left) if post_daily_range_left > 0 else 0
                 
