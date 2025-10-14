@@ -71,21 +71,162 @@ def get_next_scheduled_account():
     conn.close()
     return account
 
-def update_account_after_post(account_id):
+def debug_schedule_data(account_id):
+    """Debug function to see all scheduled media"""
     conn = get_db_connection()
     if not conn:
         return
-    cursor = conn.cursor()
-    cursor.execute("UPDATE instagram SET posts_left = posts_left - 1 WHERE id = %s", (account_id,))
-    cursor.execute("SELECT posts_left FROM instagram WHERE id = %s", (account_id,))
-    posts_left = cursor.fetchone()[0]
-    done_status = 'Yes' if posts_left <= 0 else 'No'
-    update_query = "UPDATE instagram SET selected = 'No', done = %s, next_post_time = NULL WHERE id = %s"
-    cursor.execute(update_query, (done_status, account_id))
-    conn.commit()
+    cursor = conn.cursor(dictionary=True)
+    cursor.execute("SELECT custom_schedule_data, next_post_time FROM instagram WHERE id = %s", (account_id,))
+    result = cursor.fetchone()
     cursor.close()
     conn.close()
-    print(f"DB Updated for Account ID {account_id}: posts_left is now {posts_left}, done is '{done_status}'.")
+    
+    if result and result['custom_schedule_data']:
+        try:
+            schedule_data = json.loads(result['custom_schedule_data'])
+            print("\n--- DEBUG: All Scheduled Media ---")
+            for i, media in enumerate(schedule_data):
+                print(f"  {i+1}. {media.get('media_name')} | Type: {media.get('schedule_type')} | Status: {media.get('status')} | Time: {media.get('scheduled_datetime')}")
+            print(f"  Next Post Time: {result['next_post_time']}")
+            print("--- END DEBUG ---\n")
+        except json.JSONDecodeError:
+            print("  DEBUG: Invalid schedule data")
+
+def get_scheduled_media_for_account(account_id):
+    """Get the next scheduled media file for this account that should be posted now"""
+    conn = get_db_connection()
+    if not conn:
+        return None
+    cursor = conn.cursor(dictionary=True)
+    
+    # Get custom_schedule_data AND next_post_time to understand what type of post is scheduled
+    cursor.execute("SELECT custom_schedule_data, next_post_time FROM instagram WHERE id = %s", (account_id,))
+    result = cursor.fetchone()
+    cursor.close()
+    conn.close()
+    
+    if not result or not result['custom_schedule_data']:
+        return None
+    
+    try:
+        schedule_data = json.loads(result['custom_schedule_data'])
+        now = datetime.now(pytz.timezone('Asia/Kolkata'))
+        next_post_time = result['next_post_time']
+        
+        print(f"  Debug: Looking for scheduled media. Next post time: {next_post_time}")
+        
+        # If we have a next_post_time, find which media matches it
+        if next_post_time:
+            next_post_time = make_aware(next_post_time)
+            
+            # First, look for datetime posts that match the next_post_time
+            for media in schedule_data:
+                if (media.get('status') == 'pending' and 
+                    media.get('schedule_type') == 'datetime' and 
+                    media.get('scheduled_datetime')):
+                    try:
+                        scheduled_time = datetime.strptime(media['scheduled_datetime'], '%Y-%m-%d %H:%M:%S')
+                        scheduled_time = pytz.timezone('Asia/Kolkata').localize(scheduled_time)
+                        
+                        # If this datetime post matches the scheduled time (within 2 minutes)
+                        if abs((scheduled_time - next_post_time).total_seconds()) <= 120:
+                            print(f"  Debug: Found matching datetime post: {media.get('media_name')}")
+                            return media
+                    except ValueError:
+                        continue
+            
+            # If no datetime post matches, look for range posts
+            for media in schedule_data:
+                if (media.get('status') == 'pending' and 
+                    media.get('schedule_type') == 'range'):
+                    print(f"  Debug: Found range post: {media.get('media_name')}")
+                    return media
+        
+        # Fallback: if no next_post_time or no match found, use the logic from before
+        for media in schedule_data:
+            if media.get('status') == 'pending':
+                if media.get('schedule_type') == 'datetime' and media.get('scheduled_datetime'):
+                    try:
+                        scheduled_time = datetime.strptime(media['scheduled_datetime'], '%Y-%m-%d %H:%M:%S')
+                        scheduled_time = pytz.timezone('Asia/Kolkata').localize(scheduled_time)
+                        if abs((scheduled_time - now).total_seconds()) <= 120:
+                            return media
+                    except ValueError:
+                        continue
+                elif media.get('schedule_type') == 'range':
+                    return media
+                    
+    except json.JSONDecodeError:
+        return None
+    
+    return None
+
+def update_account_after_post(account_id, media_file_id):
+    """Update database after successful post - update specific media status and counters"""
+    conn = get_db_connection()
+    if not conn:
+        return False
+    
+    try:
+        cursor = conn.cursor(dictionary=True)
+        
+        # Get current data
+        cursor.execute("SELECT custom_schedule_data, posts_left, post_daily_range_left FROM instagram WHERE id = %s", (account_id,))
+        result = cursor.fetchone()
+        
+        if not result:
+            return False
+        
+        # Update the specific media status to 'completed'
+        schedule_data = json.loads(result['custom_schedule_data']) if result['custom_schedule_data'] else []
+        for media in schedule_data:
+            if media.get('file_id') == media_file_id:
+                media['status'] = 'completed'
+                break
+        
+        # Update counters
+        new_posts_left = result['posts_left'] - 1
+        new_daily_range_left = max(0, result['post_daily_range_left'] - 1) if result['post_daily_range_left'] is not None else 0
+        done_status = 'Yes' if new_posts_left <= 0 else 'No'
+        
+        # Update database
+        update_query = """
+            UPDATE instagram 
+            SET custom_schedule_data = %s, 
+                posts_left = %s, 
+                post_daily_range_left = %s,
+                selected = 'No', 
+                done = %s, 
+                next_post_time = NULL 
+            WHERE id = %s
+        """
+        cursor.execute(update_query, (
+            json.dumps(schedule_data), 
+            new_posts_left, 
+            new_daily_range_left, 
+            done_status, 
+            account_id
+        ))
+        
+        conn.commit()
+        cursor.close()
+        conn.close()
+        
+        print(f"DB Updated for Account ID {account_id}:")
+        print(f"  - Media {media_file_id} status updated to 'completed'")
+        print(f"  - posts_left: {result['posts_left']} → {new_posts_left}")
+        print(f"  - post_daily_range_left: {result['post_daily_range_left']} → {new_daily_range_left}")
+        print(f"  - done: '{done_status}'")
+        
+        return True
+        
+    except Exception as e:
+        print(f"ERROR updating database for account {account_id}: {str(e)}")
+        conn.rollback()
+        cursor.close()
+        conn.close()
+        return False
 
 # --- Helper Functions ---
 def get_instagram_session(account):
@@ -231,88 +372,23 @@ def create_instagram_feed_folder(creds, username):
 
     return folder_id, folder_link
 
-def download_from_drive(file_id, local_path, creds):
-    drive_service = build('drive', 'v3', credentials=creds)
-    request = drive_service.files().get_media(fileId=file_id)
-    fh = io.FileIO(local_path, 'wb')
-    downloader = MediaIoBaseDownload(fh, request)
-    done = False
-    while not done:
-        status, done = downloader.next_chunk()
-    print(f"Downloaded {file_id} to {local_path}")
-
-def get_oldest_media_file(creds, account):
-    """Get the oldest media file from Google Drive based on creation time."""
-    drive_service = build('drive', 'v3', credentials=creds)
-    conn = get_db_connection()
-    if not conn:
-        return None, None, None
-    cursor = conn.cursor()
-    cursor.execute("SELECT google_drive_link FROM instagram WHERE id = %s", (account['id'],))
-    drive_link = cursor.fetchone()[0]
-    cursor.close()
-    conn.close()
-
-    folder_id = extract_folder_id(drive_link)
-    username = account['username']
+def download_specific_media(creds, file_id, media_name):
+    """Download specific media file from Google Drive by file_id"""
+    local_path = os.path.join(TEMP_FOLDER, media_name)
     
-    if drive_link and folder_id:
-        try:
-            drive_service.files().get(fileId=folder_id, fields='id').execute()
-            print(f"Using existing Google Drive folder link: {drive_link} for account {username}")
-        except Exception as e:
-            print(f"ERROR: Invalid or inaccessible folder ID {folder_id} for account {username}: {str(e)}. Creating new folder.")
-            folder_id, folder_link = create_instagram_feed_folder(creds, username)
-            conn = get_db_connection()
-            if not conn:
-                return None, None, None
-            cursor = conn.cursor()
-            cursor.execute("UPDATE instagram SET google_drive_link = %s WHERE id = %s", (folder_link, account['id']))
-            conn.commit()
-            cursor.close()
-            conn.close()
-            print(f"Updated Google Drive link for account {username}: {folder_link}")
-    else:
-        folder_id, folder_link = create_instagram_feed_folder(creds, username)
-        conn = get_db_connection()
-        if not conn:
-            return None, None, None
-        cursor = conn.cursor()
-        cursor.execute("UPDATE instagram SET google_drive_link = %s WHERE id = %s", (folder_link, account['id']))
-        conn.commit()
-        cursor.close()
-        conn.close()
-        print(f"Updated Google Drive link for account {username}: {folder_link}")
-
-    query = f"'{folder_id}' in parents"
-    results = drive_service.files().list(
-        q=query, 
-        fields="files(id, name, mimeType, createdTime)",
-        orderBy="createdTime"  # Get files ordered by creation time (oldest first)
-    ).execute()
-    files = results.get('files', [])
-
-    if not files:
-        print(f"ERROR: No media files found in folder {folder_id}")
-        return None, None, None
-
-    # Filter for media files and get the oldest one
-    oldest_file = None
-    for file in files:
-        if file['mimeType'].startswith('image/') or file['mimeType'].startswith('video/'):
-            oldest_file = file
-            break  # Since files are sorted by creation time, first media file is oldest
-
-    if not oldest_file:
-        print(f"ERROR: No valid media files found in folder {folder_id}")
-        return None, None, None
-
-    local_path = os.path.join(TEMP_FOLDER, oldest_file['name'])
-    print(f"Downloading oldest file: {oldest_file['name']} (created: {oldest_file['createdTime']})")
-    download_from_drive(oldest_file['id'], local_path, creds)
-    
-    is_video = oldest_file['mimeType'].startswith('video/')
-    return local_path, oldest_file['id'], is_video  # Return local path, file ID, and media type
+    try:
+        drive_service = build('drive', 'v3', credentials=creds)
+        request = drive_service.files().get_media(fileId=file_id)
+        fh = io.FileIO(local_path, 'wb')
+        downloader = MediaIoBaseDownload(fh, request)
+        done = False
+        while not done:
+            status, done = downloader.next_chunk()
+        print(f"Downloaded {media_name} to {local_path}")
+        return local_path
+    except Exception as e:
+        print(f"ERROR: Failed to download {media_name}: {str(e)}")
+        return None
 
 def delete_file_from_drive(file_id, creds):
     """Delete a file from Google Drive."""
@@ -343,7 +419,7 @@ def adjust_aspect_ratio(video_path, output_path):
 def post_media(client, media_path, caption, is_video=True):
     try:
         media_name = os.path.basename(media_path)
-        full_caption = f"{os.path.splitext(media_name)[0]}\n\n{caption}"
+        full_caption = f"{caption}"
         thumbnail_path = None
         if is_video:
             thumbnail_path = os.path.splitext(media_path)[0] + "_thumb.jpg"
@@ -378,6 +454,14 @@ def cleanup_temp_folder():
                     sleep(3)
                 else:
                     print(f"ERROR: Failed to delete {file_path} after {max_attempts} attempts: {str(e)}")
+
+def make_aware(dt):
+    """Convert naive datetime to timezone-aware datetime."""
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        return pytz.timezone('Asia/Kolkata').localize(dt)
+    return dt
 
 # --- Main Execution Logic ---
 def main():
@@ -439,6 +523,10 @@ def main():
 
         # Posting logic
         print(f"Initiating post for {account['username']}...")
+
+        # DEBUG: See what's scheduled
+        debug_schedule_data(account['id'])
+
         client = get_instagram_session(account)
         if not client:
             print("ERROR: Login failed. Skipping this account and looking for the next one.")
@@ -448,19 +536,48 @@ def main():
         creds = get_drive_credentials(account)
         if not creds:
             print("ERROR: Google Drive credentials not valid or could not be obtained. Skipping this account.")
-            update_account_after_post(account['id'])  # Skip to avoid stalling
+            # Skip this account by marking it as done temporarily
+            conn = get_db_connection()
+            if conn:
+                cursor = conn.cursor()
+                cursor.execute("UPDATE instagram SET selected = 'No' WHERE id = %s", (account['id'],))
+                conn.commit()
+                cursor.close()
+                conn.close()
             sleep(10)
             continue
 
-        # Get the oldest media file
-        media_to_post, drive_file_id, is_video = get_oldest_media_file(creds, account)
-        if not media_to_post:
-            print(f"ERROR: No media files found in Google Drive for {account['username']}. Skipping.")
-            update_account_after_post(account['id'])
+        # Get the SPECIFIC scheduled media to post (not oldest)
+        scheduled_media = get_scheduled_media_for_account(account['id'])
+        if not scheduled_media:
+            print(f"ERROR: No scheduled media found for {account['username']}. Skipping.")
+            # Skip this account
+            conn = get_db_connection()
+            if conn:
+                cursor = conn.cursor()
+                cursor.execute("UPDATE instagram SET selected = 'No' WHERE id = %s", (account['id'],))
+                conn.commit()
+                cursor.close()
+                conn.close()
             cleanup_temp_folder()
             continue
 
-        print(f"Selected oldest media to post: {os.path.basename(media_to_post)}")
+        print(f"Selected scheduled media to post: {scheduled_media.get('media_name', 'Unknown')}")
+
+        # Download the specific scheduled media
+        media_to_post = download_specific_media(
+            creds, 
+            scheduled_media['file_id'], 
+            scheduled_media['media_name']
+        )
+        
+        if not media_to_post:
+            print(f"ERROR: Failed to download scheduled media for {account['username']}. Skipping.")
+            cleanup_temp_folder()
+            continue
+
+        # Determine if it's video or image
+        is_video = scheduled_media['media_name'].lower().endswith(('.mp4', '.mov', '.avi', '.mkv'))
 
         post_path = media_to_post
         if is_video:
@@ -469,20 +586,23 @@ def main():
                 post_path = adjusted_path
 
         try:
-            with open(CAPTION_FILE, "r", encoding="utf-8") as f:
-                caption = f.read()
+            caption = scheduled_media.get('caption', '')
+            if not caption:
+                with open(CAPTION_FILE, "r", encoding="utf-8") as f:
+                    caption = f.read()
         except FileNotFoundError:
             caption = "#reels #instagram"
 
         if post_media(client, post_path, caption, is_video=is_video):
             # Delete from Google Drive after successful posting
-            if drive_file_id:
-                if delete_file_from_drive(drive_file_id, creds):
+            if scheduled_media.get('file_id'):
+                if delete_file_from_drive(scheduled_media['file_id'], creds):
                     print(f"SUCCESS: File deleted from Google Drive after posting")
                 else:
                     print(f"WARNING: File posted but could not delete from Google Drive")
             
-            update_account_after_post(account['id'])
+            # Update database - specific media status and counters
+            update_account_after_post(account['id'], scheduled_media['file_id'])
         else:
             print("ERROR: Post failed. Database will not be updated for this run. Looking for next task.")
 

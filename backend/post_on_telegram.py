@@ -82,7 +82,8 @@ def get_next_scheduled_channel():
     query = """
         SELECT 
             t.id, t.channel_name, t.token_sesson, t.token_drive, 
-            t.google_drive_link, t.next_post_time, t.posts_left
+            t.google_drive_link, t.next_post_time, t.posts_left,
+            t.custom_schedule_data, t.post_daily_range_left
         FROM telegram t
         WHERE t.selected = 'Yes' AND t.done = 'No' AND t.posts_left > 0 AND t.next_post_time IS NOT NULL
         ORDER BY t.next_post_time ASC
@@ -94,21 +95,162 @@ def get_next_scheduled_channel():
     conn.close()
     return channel
 
-def update_channel_after_post(channel_id):
+def debug_schedule_data_telegram(channel_id):
+    """Debug function to see all scheduled media for Telegram"""
     conn = get_db_connection()
     if not conn:
         return
-    cursor = conn.cursor()
-    cursor.execute("UPDATE telegram SET posts_left = posts_left - 1 WHERE id = %s", (channel_id,))
-    cursor.execute("SELECT posts_left FROM telegram WHERE id = %s", (channel_id,))
-    posts_left = cursor.fetchone()[0]
-    done_status = 'Yes' if posts_left <= 0 else 'No'
-    update_query = "UPDATE telegram SET selected = 'No', done = %s, next_post_time = NULL WHERE id = %s"
-    cursor.execute(update_query, (done_status, channel_id))
-    conn.commit()
+    cursor = conn.cursor(dictionary=True)
+    cursor.execute("SELECT custom_schedule_data, next_post_time FROM telegram WHERE id = %s", (channel_id,))
+    result = cursor.fetchone()
     cursor.close()
     conn.close()
-    print_success(f"Channel updated - Posts left: {posts_left}")
+    
+    if result and result['custom_schedule_data']:
+        try:
+            schedule_data = json.loads(result['custom_schedule_data'])
+            print("\n--- DEBUG: All Scheduled Media (Telegram) ---")
+            for i, media in enumerate(schedule_data):
+                print(f"  {i+1}. {media.get('media_name')} | Type: {media.get('schedule_type')} | Status: {media.get('status')} | Time: {media.get('scheduled_datetime')}")
+            print(f"  Next Post Time: {result['next_post_time']}")
+            print("--- END DEBUG ---\n")
+        except json.JSONDecodeError:
+            print("  DEBUG: Invalid schedule data")
+
+def get_scheduled_media_for_telegram(channel_id):
+    """Get the next scheduled media file for this Telegram channel that should be posted now"""
+    conn = get_db_connection()
+    if not conn:
+        return None
+    cursor = conn.cursor(dictionary=True)
+    
+    # Get custom_schedule_data AND next_post_time to understand what type of post is scheduled
+    cursor.execute("SELECT custom_schedule_data, next_post_time FROM telegram WHERE id = %s", (channel_id,))
+    result = cursor.fetchone()
+    cursor.close()
+    conn.close()
+    
+    if not result or not result['custom_schedule_data']:
+        return None
+    
+    try:
+        schedule_data = json.loads(result['custom_schedule_data'])
+        now = datetime.now(pytz.timezone('Asia/Kolkata'))
+        next_post_time = result['next_post_time']
+        
+        print(f"  Debug: Looking for scheduled media. Next post time: {next_post_time}")
+        
+        # If we have a next_post_time, find which media matches it
+        if next_post_time:
+            next_post_time = make_aware(next_post_time)
+            
+            # First, look for datetime posts that match the next_post_time
+            for media in schedule_data:
+                if (media.get('status') == 'pending' and 
+                    media.get('schedule_type') == 'datetime' and 
+                    media.get('scheduled_datetime')):
+                    try:
+                        scheduled_time = datetime.strptime(media['scheduled_datetime'], '%Y-%m-%d %H:%M:%S')
+                        scheduled_time = pytz.timezone('Asia/Kolkata').localize(scheduled_time)
+                        
+                        # If this datetime post matches the scheduled time (within 2 minutes)
+                        if abs((scheduled_time - next_post_time).total_seconds()) <= 120:
+                            print(f"  Debug: Found matching datetime post: {media.get('media_name')}")
+                            return media
+                    except ValueError:
+                        continue
+            
+            # If no datetime post matches, look for range posts
+            for media in schedule_data:
+                if (media.get('status') == 'pending' and 
+                    media.get('schedule_type') == 'range'):
+                    print(f"  Debug: Found range post: {media.get('media_name')}")
+                    return media
+        
+        # Fallback: if no next_post_time or no match found, use the logic from before
+        for media in schedule_data:
+            if media.get('status') == 'pending':
+                if media.get('schedule_type') == 'datetime' and media.get('scheduled_datetime'):
+                    try:
+                        scheduled_time = datetime.strptime(media['scheduled_datetime'], '%Y-%m-%d %H:%M:%S')
+                        scheduled_time = pytz.timezone('Asia/Kolkata').localize(scheduled_time)
+                        if abs((scheduled_time - now).total_seconds()) <= 120:
+                            return media
+                    except ValueError:
+                        continue
+                elif media.get('schedule_type') == 'range':
+                    return media
+                    
+    except json.JSONDecodeError:
+        return None
+    
+    return None
+
+def update_channel_after_post(channel_id, media_file_id):
+    """Update Telegram channel after successful post - update specific media status and counters"""
+    conn = get_db_connection()
+    if not conn:
+        return False
+    
+    try:
+        cursor = conn.cursor(dictionary=True)
+        
+        # Get current data
+        cursor.execute("SELECT custom_schedule_data, posts_left, post_daily_range_left FROM telegram WHERE id = %s", (channel_id,))
+        result = cursor.fetchone()
+        
+        if not result:
+            return False
+        
+        # Update the specific media status to 'completed'
+        schedule_data = json.loads(result['custom_schedule_data']) if result['custom_schedule_data'] else []
+        for media in schedule_data:
+            if media.get('file_id') == media_file_id:
+                media['status'] = 'completed'
+                break
+        
+        # Update counters
+        new_posts_left = result['posts_left'] - 1
+        new_daily_range_left = max(0, result['post_daily_range_left'] - 1) if result['post_daily_range_left'] is not None else 0
+        done_status = 'Yes' if new_posts_left <= 0 else 'No'
+        
+        # Update database
+        update_query = """
+            UPDATE telegram 
+            SET custom_schedule_data = %s, 
+                posts_left = %s, 
+                post_daily_range_left = %s,
+                selected = 'No', 
+                done = %s, 
+                next_post_time = NULL 
+            WHERE id = %s
+        """
+        cursor.execute(update_query, (
+            json.dumps(schedule_data), 
+            new_posts_left, 
+            new_daily_range_left, 
+            done_status, 
+            channel_id
+        ))
+        
+        conn.commit()
+        cursor.close()
+        conn.close()
+        
+        print_success(f"Telegram Channel ID {channel_id} updated:")
+        print_info(f"  - Media {media_file_id} status updated to 'completed'")
+        print_info(f"  - posts_left: {result['posts_left']} → {new_posts_left}")
+        print_info(f"  - post_daily_range_left: {result['post_daily_range_left']} → {new_daily_range_left}")
+        print_info(f"  - done: '{done_status}'")
+        
+        return True
+        
+    except Exception as e:
+        print_error(f"ERROR updating database for Telegram channel {channel_id}: {str(e)}")
+        conn.rollback()
+        cursor.close()
+        conn.close()
+        return False
 
 # --- Helper Functions ---
 def get_channel_details(channel):
@@ -290,54 +432,23 @@ def get_drive_folder_id(creds, channel):
 
     return folder_id, folder_link
 
-def download_from_drive(file_id, local_path, creds):
-    drive_service = build('drive', 'v3', credentials=creds)
-    request = drive_service.files().get_media(fileId=file_id)
-    fh = io.FileIO(local_path, 'wb')
-    downloader = MediaIoBaseDownload(fh, request)
-    done = False
-    while not done:
-        status, done = downloader.next_chunk()
-    print_success(f"Downloaded: {os.path.basename(local_path)}")
-
-def get_oldest_media_file(creds, channel):
-    """Get the oldest media file from Google Drive based on creation time."""
-    folder_id, folder_link = get_drive_folder_id(creds, channel)
-    if not folder_id:
-        print_error("Failed to get folder ID")
-        return None, None
-
-    drive_service = build('drive', 'v3', credentials=creds)
-    query = f"'{folder_id}' in parents"
-    results = drive_service.files().list(
-        q=query, 
-        fields="files(id, name, mimeType, createdTime)",
-        orderBy="createdTime"
-    ).execute()
-    files = results.get('files', [])
-
-    if not files:
-        print_error("No media files found in Drive folder")
-        return None, None
-
-    # Filter for media files and get the oldest one
-    media_files = []
-    for file in files:
-        if file['mimeType'].startswith(('image/', 'video/')) or file['name'].lower().endswith('.zip'):
-            media_files.append(file)
-
-    if not media_files:
-        print_error("No valid media files found")
-        return None, None
-
-    # Get the oldest file (first in the sorted list)
-    oldest_file = media_files[0]
-    local_path = os.path.join(TEMP_FOLDER, oldest_file['name'])
+def download_specific_media(creds, file_id, media_name):
+    """Download specific media file from Google Drive by file_id"""
+    local_path = os.path.join(TEMP_FOLDER, media_name)
     
-    print_step(f"Downloading: {oldest_file['name']}")
-    download_from_drive(oldest_file['id'], local_path, creds)
-    
-    return local_path, oldest_file['id']
+    try:
+        drive_service = build('drive', 'v3', credentials=creds)
+        request = drive_service.files().get_media(fileId=file_id)
+        fh = io.FileIO(local_path, 'wb')
+        downloader = MediaIoBaseDownload(fh, request)
+        done = False
+        while not done:
+            status, done = downloader.next_chunk()
+        print_success(f"Downloaded: {media_name}")
+        return local_path
+    except Exception as e:
+        print_error(f"Failed to download {media_name}: {str(e)}")
+        return None
 
 def delete_file_from_drive(file_id, creds):
     """Delete a file from Google Drive with proper permissions"""
@@ -379,10 +490,18 @@ def cleanup_temp_folder():
                 else:
                     print_warning(f"Could not delete: {filename}")
 
-async def send_file_to_channel(file_path, channel_id):
+def make_aware(dt):
+    """Convert naive datetime to timezone-aware datetime."""
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        return pytz.timezone('Asia/Kolkata').localize(dt)
+    return dt
+
+async def send_file_to_channel(file_path, channel_id, caption=None):
     try:
         bot = Bot(token=BOT_TOKEN)
-        file_title = os.path.splitext(os.path.basename(file_path))[0]
+        file_title = caption or os.path.splitext(os.path.basename(file_path))[0]
         
         print_step(f"Sending to Telegram...")
         with open(file_path, 'rb') as file:
@@ -421,39 +540,79 @@ async def process_channel(channel):
     channel_name, channel_id = get_channel_details(channel)
     if not channel_name or not channel_id:
         print_error("Invalid channel details")
-        update_channel_after_post(channel['id'])
+        # Skip this channel
+        conn = get_db_connection()
+        if conn:
+            cursor = conn.cursor()
+            cursor.execute("UPDATE telegram SET selected = 'No' WHERE id = %s", (channel['id'],))
+            conn.commit()
+            cursor.close()
+            conn.close()
         cleanup_temp_folder()
         return
 
     creds = get_drive_credentials(channel)
     if not creds:
         print_error("Drive credentials unavailable")
-        update_channel_after_post(channel['id'])
+        # Skip this channel
+        conn = get_db_connection()
+        if conn:
+            cursor = conn.cursor()
+            cursor.execute("UPDATE telegram SET selected = 'No' WHERE id = %s", (channel['id'],))
+            conn.commit()
+            cursor.close()
+            conn.close()
         cleanup_temp_folder()
         return
 
-    # Get the oldest media file and its Drive ID
-    media_to_post, drive_file_id = get_oldest_media_file(creds, channel)
+    # DEBUG: See what's scheduled
+    debug_schedule_data_telegram(channel['id'])
+
+    # Get the SPECIFIC scheduled media to post (NEW!)
+    scheduled_media = get_scheduled_media_for_telegram(channel['id'])
+    if not scheduled_media:
+        print_error("No scheduled media found for this channel")
+        # Skip this channel
+        conn = get_db_connection()
+        if conn:
+            cursor = conn.cursor()
+            cursor.execute("UPDATE telegram SET selected = 'No' WHERE id = %s", (channel['id'],))
+            conn.commit()
+            cursor.close()
+            conn.close()
+        cleanup_temp_folder()
+        return
+
+    print_success(f"Scheduled media: {scheduled_media.get('media_name', 'Unknown')}")
+
+    # Download the specific scheduled media
+    media_to_post = download_specific_media(
+        creds, 
+        scheduled_media['file_id'], 
+        scheduled_media['media_name']
+    )
+    
     if not media_to_post:
-        print_error("No media files available")
-        update_channel_after_post(channel['id'])
+        print_error("Failed to download scheduled media")
         cleanup_temp_folder()
         return
 
-    print_success(f"Selected: {os.path.basename(media_to_post)}")
+    # Use media-specific caption if available
+    media_caption = scheduled_media.get('caption')
 
-    if await send_file_to_channel(media_to_post, channel_id):
+    if await send_file_to_channel(media_to_post, channel_id, caption=media_caption):
         # Delete from Google Drive after successful posting
         print_header("Cleanup")
-        if drive_file_id:
+        if scheduled_media.get('file_id'):
             print_step("Removing file from Google Drive...")
-            if delete_file_from_drive(drive_file_id, creds):
+            if delete_file_from_drive(scheduled_media['file_id'], creds):
                 print_success("File removed from Drive")
             else:
                 print_warning("File posted but could not delete from Drive")
                 print_info("Check folder permissions in Google Drive")
         
-        update_channel_after_post(channel['id'])
+        # Update database with specific media info (NEW!)
+        update_channel_after_post(channel['id'], scheduled_media['file_id'])
     else:
         print_error("Post failed - keeping files in Drive")
         # Do not update database on failure, and don't delete from Drive

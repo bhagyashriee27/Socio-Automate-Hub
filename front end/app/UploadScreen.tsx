@@ -62,10 +62,14 @@ const UploadScreen: React.FC = () => {
   const [currentMediaForScheduling, setCurrentMediaForScheduling] = useState<MediaFile | null>(null);
   const [selectedScheduleType, setSelectedScheduleType] = useState<'range' | 'datetime'>('range');
   const [scheduledDateTime, setScheduledDateTime] = useState<string>('');
+  
+  // Date/Time Picker States (MUST BE RENDERED OUTSIDE MODALS)
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [showTimePicker, setShowTimePicker] = useState(false);
   const [selectedDate, setSelectedDate] = useState<Date | null>(null);
   const [selectedTime, setSelectedTime] = useState<Date | null>(null);
+  const tempSelectedDateRef = useRef<Date | null>(null); // To hold date while selecting time
+  const tempSelectedTimeRef = useRef<Date | null>(null); // To hold time while selecting date
 
   // Caption modal states
   const [captionModalVisible, setCaptionModalVisible] = useState(false);
@@ -135,6 +139,55 @@ const UploadScreen: React.FC = () => {
     }
   };
 
+  // --- Date/Time Picker Handlers (Updated for Root Rendering) ---
+  const handleDateChange = (event: any, date?: Date) => {
+    setShowDatePicker(false);
+    if (date) {
+      const newDate = date;
+      const timeToUse = tempSelectedTimeRef.current || new Date(); // Use existing time or default
+      newDate.setHours(timeToUse.getHours());
+      newDate.setMinutes(timeToUse.getMinutes());
+      
+      setSelectedDate(newDate);
+      tempSelectedDateRef.current = newDate;
+      updateScheduledDateTime(newDate, timeToUse);
+    }
+  };
+
+  const handleTimeChange = (event: any, time?: Date) => {
+    setShowTimePicker(false);
+    if (time) {
+      const newTime = time;
+      const dateToUse = tempSelectedDateRef.current || new Date(); // Use existing date or default
+      
+      const newDateTime = new Date(dateToUse);
+      newDateTime.setHours(newTime.getHours());
+      newDateTime.setMinutes(newTime.getMinutes());
+
+      setSelectedTime(newTime);
+      tempSelectedTimeRef.current = newTime;
+      updateScheduledDateTime(dateToUse, newTime);
+    }
+  };
+
+  const openDatePicker = () => {
+    // Initialize refs if null, using current date/time
+    const now = new Date();
+    if (!tempSelectedDateRef.current) tempSelectedDateRef.current = selectedDate || now;
+    if (!tempSelectedTimeRef.current) tempSelectedTimeRef.current = selectedTime || now;
+    setShowDatePicker(true);
+  }
+
+  const openTimePicker = () => {
+    // Initialize refs if null, using current date/time
+    const now = new Date();
+    if (!tempSelectedDateRef.current) tempSelectedDateRef.current = selectedDate || now;
+    if (!tempSelectedTimeRef.current) tempSelectedTimeRef.current = selectedTime || now;
+    setShowTimePicker(true);
+  }
+  // --- End Date/Time Picker Handlers ---
+
+
   const pickMultipleMedia = async (mediaType: 'images' | 'videos' | 'all') => {
     try {
       const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -182,14 +235,19 @@ const UploadScreen: React.FC = () => {
     setCurrentMediaForScheduling(media);
     setSelectedScheduleType(media.scheduleType);
     
+    // Set temp refs and state for date/time if available
     if (media.scheduledDatetime) {
       const date = new Date(media.scheduledDatetime);
       setSelectedDate(date);
       setSelectedTime(date);
+      tempSelectedDateRef.current = date;
+      tempSelectedTimeRef.current = date;
       setScheduledDateTime(media.scheduledDatetime);
     } else {
       setSelectedDate(null);
       setSelectedTime(null);
+      tempSelectedDateRef.current = new Date(); // Default to now
+      tempSelectedTimeRef.current = new Date(); // Default to now
       setScheduledDateTime('');
     }
     
@@ -208,6 +266,11 @@ const UploadScreen: React.FC = () => {
   const saveScheduleSettings = () => {
     if (!currentMediaForScheduling) return;
 
+    if (selectedScheduleType === 'datetime' && !scheduledDateTime) {
+      Alert.alert('Validation Error', 'Please select a scheduled date and time.');
+      return;
+    }
+
     setSelectedMedia(prev =>
       prev.map(media =>
         media.id === currentMediaForScheduling.id
@@ -221,9 +284,9 @@ const UploadScreen: React.FC = () => {
     );
 
     setScheduleModalVisible(false);
-    setShowDatePicker(false);
-    setShowTimePicker(false);
-    setSelectedDate(null);
+    // Reset picker-related states
+    // Note: Do not reset temp refs here, keep them for next open
+    setSelectedDate(null); 
     setSelectedTime(null);
     setScheduledDateTime('');
     setCurrentMediaForScheduling(null);
@@ -1002,14 +1065,13 @@ const UploadScreen: React.FC = () => {
               
               {/* === FIX APPLIED: NESTED SECONDARY MODALS START HERE === */}
               
-              {/* Schedule Settings Modal (NOW NESTED) */}
+              {/* Schedule Settings Modal (NESTED) */}
               <Modal
                 animationType="slide"
                 transparent={true}
                 visible={scheduleModalVisible}
                 onRequestClose={() => setScheduleModalVisible(false)}
                 supportedOrientations={['portrait', 'landscape']}
-                // presentationStyle="overFullScreen" // Can be useful to ensure it overlays parent modal on iOS
               >
                 <View style={styles.modalBackdrop}>
                   <View style={styles.modalContainer}>
@@ -1064,7 +1126,7 @@ const UploadScreen: React.FC = () => {
                             <Text style={styles.pickerLabel}>Date:</Text>
                             <TouchableOpacity
                               style={styles.pickerButton}
-                              onPress={() => setShowDatePicker(true)}
+                              onPress={openDatePicker} // Use new handler
                             >
                               <Text style={styles.pickerButtonText}>
                                 {selectedDate ? selectedDate.toDateString() : 'Select Date'}
@@ -1076,7 +1138,7 @@ const UploadScreen: React.FC = () => {
                             <Text style={styles.pickerLabel}>Time:</Text>
                             <TouchableOpacity
                               style={styles.pickerButton}
-                              onPress={() => setShowTimePicker(true)}
+                              onPress={openTimePicker} // Use new handler
                             >
                               <Text style={styles.pickerButtonText}>
                                 {selectedTime ? 
@@ -1099,43 +1161,7 @@ const UploadScreen: React.FC = () => {
                               </Text>
                             </View>
                           )}
-
-                          {showDatePicker && (
-                            <DateTimePicker
-                              value={selectedDate || new Date()}
-                              mode="date"
-                              display={Platform.OS === 'ios' ? 'spinner' : 'default'} // Changed to 'spinner' to be less intrusive inside a modal
-                              onChange={(event, date) => {
-                                setShowDatePicker(false);
-                                if (date) {
-                                  const newDate = new Date(date);
-                                  newDate.setHours(selectedTime ? selectedTime.getHours() : 0);
-                                  newDate.setMinutes(selectedTime ? selectedTime.getMinutes() : 0);
-                                  setSelectedDate(newDate);
-                                  updateScheduledDateTime(newDate, selectedTime);
-                                }
-                              }}
-                              minimumDate={new Date()}
-                            />
-                          )}
-                          {showTimePicker && (
-                            <DateTimePicker
-                              value={selectedTime || new Date()}
-                              mode="time"
-                              display={Platform.OS === 'ios' ? 'spinner' : 'default'} // Changed to 'spinner' to be less intrusive inside a modal
-                              onChange={(event, time) => {
-                                setShowTimePicker(false);
-                                if (time) {
-                                  const newTime = new Date();
-                                  newTime.setHours(time.getHours());
-                                  newTime.setMinutes(time.getMinutes());
-                                  newTime.setSeconds(0);
-                                  setSelectedTime(newTime);
-                                  updateScheduledDateTime(selectedDate, newTime);
-                                }
-                              }}
-                            />
-                          )}
+                          
                         </View>
                       )}
 
@@ -1152,11 +1178,6 @@ const UploadScreen: React.FC = () => {
                           style={styles.scheduleCancelButton}
                           onPress={() => {
                             setScheduleModalVisible(false);
-                            setShowDatePicker(false);
-                            setShowTimePicker(false);
-                            setSelectedDate(null);
-                            setSelectedTime(null);
-                            setScheduledDateTime('');
                           }}
                         >
                           <Text style={styles.scheduleCancelButtonText}>Cancel</Text>
@@ -1175,14 +1196,13 @@ const UploadScreen: React.FC = () => {
                 </View>
               </Modal>
 
-              {/* Caption Modal (NOW NESTED) */}
+              {/* Caption Modal (NESTED) */}
               <Modal
                 animationType="slide"
                 transparent={true}
                 visible={captionModalVisible}
                 onRequestClose={() => setCaptionModalVisible(false)}
                 supportedOrientations={['portrait', 'landscape']}
-                // presentationStyle="overFullScreen" // Can be useful to ensure it overlays parent modal on iOS
               >
                 <View style={styles.modalBackdrop}>
                   <View style={styles.modalContainer}>
@@ -1237,16 +1257,34 @@ const UploadScreen: React.FC = () => {
           </View>
         </View>
       </Modal>
+
+      {/* ========================================
+        FIX: DATE/TIME PICKERS MOVED TO ROOT LEVEL
+        ========================================
+      */}
+      {showDatePicker && (
+        <DateTimePicker
+          value={selectedDate || new Date()}
+          mode="date"
+          display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+          onChange={handleDateChange}
+          minimumDate={new Date()}
+        />
+      )}
+      
+      {showTimePicker && (
+        <DateTimePicker
+          value={selectedTime || new Date()}
+          mode="time"
+          display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+          onChange={handleTimeChange}
+        />
+      )}
     </SafeAreaView>
   );
 };
 
-// ... (Styles object remains the same)
-// **NOTE**: I also changed the `DateTimePicker` `display` prop from `'inline'` to `'spinner'` for the nested date/time pickers on iOS, as `'inline'` can sometimes clash with modal presentation.
-
-// The styles object is long, so I'll omit it here for brevity, 
-// but ensure you use the original `styles` object provided in your prompt.
-
+// ... (Styles object is not changed)
 const styles = StyleSheet.create({
     container: {
       flex: 1,

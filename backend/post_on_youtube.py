@@ -97,6 +97,7 @@ def get_next_scheduled_youtube():
         SELECT 
             y.id, y.user_id, y.username, y.channel_id, y.token_sesson, 
             y.google_drive_link, y.next_post_time, y.posts_left,
+            y.custom_schedule_data, y.post_daily_range_left,
             u.Name AS user_name
         FROM youtube y
         JOIN user u ON y.user_id = u.Id
@@ -110,22 +111,162 @@ def get_next_scheduled_youtube():
     conn.close()
     return channel
 
-def update_channel_after_post(channel_id):
-    """Update YouTube channel after successful post."""
+def debug_schedule_data_youtube(channel_id):
+    """Debug function to see all scheduled media for YouTube"""
     conn = get_db_connection()
     if not conn:
         return
-    cursor = conn.cursor()
-    cursor.execute("UPDATE youtube SET posts_left = posts_left - 1 WHERE id = %s", (channel_id,))
-    cursor.execute("SELECT posts_left FROM youtube WHERE id = %s", (channel_id,))
-    posts_left = cursor.fetchone()[0]
-    done_status = 'Yes' if posts_left <= 0 else 'No'
-    update_query = "UPDATE youtube SET selected = 'No', done = %s, next_post_time = NULL WHERE id = %s"
-    cursor.execute(update_query, (done_status, channel_id))
-    conn.commit()
+    cursor = conn.cursor(dictionary=True)
+    cursor.execute("SELECT custom_schedule_data, next_post_time FROM youtube WHERE id = %s", (channel_id,))
+    result = cursor.fetchone()
     cursor.close()
     conn.close()
-    print_success(f"Channel updated - Posts left: {posts_left}")
+    
+    if result and result['custom_schedule_data']:
+        try:
+            schedule_data = json.loads(result['custom_schedule_data'])
+            print("\n--- DEBUG: All Scheduled Media (YouTube) ---")
+            for i, media in enumerate(schedule_data):
+                print(f"  {i+1}. {media.get('media_name')} | Type: {media.get('schedule_type')} | Status: {media.get('status')} | Time: {media.get('scheduled_datetime')}")
+            print(f"  Next Post Time: {result['next_post_time']}")
+            print("--- END DEBUG ---\n")
+        except json.JSONDecodeError:
+            print("  DEBUG: Invalid schedule data")
+
+def get_scheduled_media_for_youtube(channel_id):
+    """Get the next scheduled media file for this YouTube channel that should be posted now"""
+    conn = get_db_connection()
+    if not conn:
+        return None
+    cursor = conn.cursor(dictionary=True)
+    
+    # Get custom_schedule_data AND next_post_time to understand what type of post is scheduled
+    cursor.execute("SELECT custom_schedule_data, next_post_time FROM youtube WHERE id = %s", (channel_id,))
+    result = cursor.fetchone()
+    cursor.close()
+    conn.close()
+    
+    if not result or not result['custom_schedule_data']:
+        return None
+    
+    try:
+        schedule_data = json.loads(result['custom_schedule_data'])
+        now = datetime.now(pytz.timezone('Asia/Kolkata'))
+        next_post_time = result['next_post_time']
+        
+        print(f"  Debug: Looking for scheduled media. Next post time: {next_post_time}")
+        
+        # If we have a next_post_time, find which media matches it
+        if next_post_time:
+            next_post_time = make_aware(next_post_time)
+            
+            # First, look for datetime posts that match the next_post_time
+            for media in schedule_data:
+                if (media.get('status') == 'pending' and 
+                    media.get('schedule_type') == 'datetime' and 
+                    media.get('scheduled_datetime')):
+                    try:
+                        scheduled_time = datetime.strptime(media['scheduled_datetime'], '%Y-%m-%d %H:%M:%S')
+                        scheduled_time = pytz.timezone('Asia/Kolkata').localize(scheduled_time)
+                        
+                        # If this datetime post matches the scheduled time (within 2 minutes)
+                        if abs((scheduled_time - next_post_time).total_seconds()) <= 120:
+                            print(f"  Debug: Found matching datetime post: {media.get('media_name')}")
+                            return media
+                    except ValueError:
+                        continue
+            
+            # If no datetime post matches, look for range posts
+            for media in schedule_data:
+                if (media.get('status') == 'pending' and 
+                    media.get('schedule_type') == 'range'):
+                    print(f"  Debug: Found range post: {media.get('media_name')}")
+                    return media
+        
+        # Fallback: if no next_post_time or no match found, use the logic from before
+        for media in schedule_data:
+            if media.get('status') == 'pending':
+                if media.get('schedule_type') == 'datetime' and media.get('scheduled_datetime'):
+                    try:
+                        scheduled_time = datetime.strptime(media['scheduled_datetime'], '%Y-%m-%d %H:%M:%S')
+                        scheduled_time = pytz.timezone('Asia/Kolkata').localize(scheduled_time)
+                        if abs((scheduled_time - now).total_seconds()) <= 120:
+                            return media
+                    except ValueError:
+                        continue
+                elif media.get('schedule_type') == 'range':
+                    return media
+                    
+    except json.JSONDecodeError:
+        return None
+    
+    return None
+
+def update_channel_after_post(channel_id, media_file_id):
+    """Update YouTube channel after successful post - update specific media status and counters"""
+    conn = get_db_connection()
+    if not conn:
+        return False
+    
+    try:
+        cursor = conn.cursor(dictionary=True)
+        
+        # Get current data
+        cursor.execute("SELECT custom_schedule_data, posts_left, post_daily_range_left FROM youtube WHERE id = %s", (channel_id,))
+        result = cursor.fetchone()
+        
+        if not result:
+            return False
+        
+        # Update the specific media status to 'completed'
+        schedule_data = json.loads(result['custom_schedule_data']) if result['custom_schedule_data'] else []
+        for media in schedule_data:
+            if media.get('file_id') == media_file_id:
+                media['status'] = 'completed'
+                break
+        
+        # Update counters
+        new_posts_left = result['posts_left'] - 1
+        new_daily_range_left = max(0, result['post_daily_range_left'] - 1) if result['post_daily_range_left'] is not None else 0
+        done_status = 'Yes' if new_posts_left <= 0 else 'No'
+        
+        # Update database
+        update_query = """
+            UPDATE youtube 
+            SET custom_schedule_data = %s, 
+                posts_left = %s, 
+                post_daily_range_left = %s,
+                selected = 'No', 
+                done = %s, 
+                next_post_time = NULL 
+            WHERE id = %s
+        """
+        cursor.execute(update_query, (
+            json.dumps(schedule_data), 
+            new_posts_left, 
+            new_daily_range_left, 
+            done_status, 
+            channel_id
+        ))
+        
+        conn.commit()
+        cursor.close()
+        conn.close()
+        
+        print_success(f"YouTube Channel ID {channel_id} updated:")
+        print_info(f"  - Media {media_file_id} status updated to 'completed'")
+        print_info(f"  - posts_left: {result['posts_left']} → {new_posts_left}")
+        print_info(f"  - post_daily_range_left: {result['post_daily_range_left']} → {new_daily_range_left}")
+        print_info(f"  - done: '{done_status}'")
+        
+        return True
+        
+    except Exception as e:
+        print_error(f"ERROR updating database for YouTube channel {channel_id}: {str(e)}")
+        conn.rollback()
+        cursor.close()
+        conn.close()
+        return False
 
 def get_drive_token_from_db(user_id):
     """Retrieve token_drive from the instagram table."""
@@ -294,52 +435,23 @@ def extract_folder_id(drive_link):
     print_error(f"Invalid Google Drive folder link: {drive_link}")
     return None
 
-def get_oldest_video_file(creds, channel):
-    """Get the oldest video file from Google Drive."""
-    drive_link = channel['google_drive_link']
-    if not drive_link:
-        print_error("No Drive link available")
-        return None, None
-
-    folder_id = extract_folder_id(drive_link)
-    if not folder_id:
-        return None, None
-
+def download_specific_media(creds, file_id, media_name):
+    """Download specific media file from Google Drive by file_id"""
+    local_path = os.path.join(TEMP_FOLDER, media_name)
+    
     try:
         drive_service = build('drive', 'v3', credentials=creds)
-        query = f"'{folder_id}' in parents and mimeType contains 'video/'"
-        results = drive_service.files().list(
-            q=query, 
-            fields="files(id, name, mimeType, createdTime)",
-            orderBy="createdTime"
-        ).execute()
-        files = results.get("files", [])
-        
-        if not files:
-            print_error("No video files found in Drive folder")
-            return None, None
-        
-        # Get the oldest file
-        oldest_file = files[0]
-        local_path = os.path.join(TEMP_FOLDER, oldest_file["name"])
-        
-        print_step(f"Downloading: {oldest_file['name']}")
-        download_from_drive(drive_service, oldest_file['id'], local_path)
-        
-        return local_path, oldest_file['id']
+        request = drive_service.files().get_media(fileId=file_id)
+        fh = io.FileIO(local_path, 'wb')
+        downloader = MediaIoBaseDownload(fh, request)
+        done = False
+        while not done:
+            status, done = downloader.next_chunk()
+        print_success(f"Downloaded {media_name}")
+        return local_path
     except Exception as e:
-        print_error(f"Failed to get video from Drive: {str(e)}")
-        return None, None
-
-def download_from_drive(drive_service, file_id, local_path):
-    """Download a file from Google Drive."""
-    request = drive_service.files().get_media(fileId=file_id)
-    fh = io.FileIO(local_path, 'wb')
-    downloader = MediaIoBaseDownload(fh, request)
-    done = False
-    while not done:
-        status, done = downloader.next_chunk()
-    print_success(f"Downloaded: {os.path.basename(local_path)}")
+        print_error(f"Failed to download {media_name}: {str(e)}")
+        return None
 
 def delete_file_from_drive(file_id, creds):
     """Delete a file from Google Drive."""
@@ -407,8 +519,11 @@ def get_channel_info(youtube, expected_channel_id):
         print_error(f"Failed to retrieve channel info: {str(e)}")
         return None, None
 
-def get_caption():
-    """Read caption from caption_yt.txt or use default."""
+def get_caption(media_caption=None):
+    """Read caption from media data or caption_yt.txt or use default."""
+    if media_caption:
+        return media_caption
+    
     caption_file = "caption_yt.txt"
     default_caption = "Uploaded via SocioMate"
     if os.path.exists(caption_file):
@@ -419,11 +534,14 @@ def get_caption():
         f.write(default_caption)
     return default_caption
 
-def upload_video(youtube, file_path, channel_name):
+def upload_video(youtube, file_path, channel_name, title=None, description=None):
     """Upload a video to YouTube."""
     try:
-        title = os.path.splitext(os.path.basename(file_path))[0]
-        description = get_caption()
+        if not title:
+            title = os.path.splitext(os.path.basename(file_path))[0]
+        if not description:
+            description = get_caption()
+            
         tags = ["sociomate", "youtube", "automation"]
         category_id = "22"  # People & Blogs
         privacy_status = "public"
@@ -456,6 +574,14 @@ def upload_video(youtube, file_path, channel_name):
         print_error(f"Upload failed: {str(e)}")
         return False
 
+def make_aware(dt):
+    """Convert naive datetime to timezone-aware datetime."""
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        return pytz.timezone('Asia/Kolkata').localize(dt)
+    return dt
+
 # --- Main Execution Logic ---
 async def process_youtube_channel(channel):
     """Process a single YouTube channel."""
@@ -475,14 +601,37 @@ async def process_youtube_channel(channel):
         print_error("Channel verification failed")
         return
 
-    # Get video from Drive
+    # DEBUG: See what's scheduled
+    debug_schedule_data_youtube(channel['id'])
+
+    # Get SPECIFIC scheduled media (NEW!)
+    scheduled_media = get_scheduled_media_for_youtube(channel['id'])
+    if not scheduled_media:
+        print_error("No scheduled media found for this channel")
+        # Skip this channel
+        conn = get_db_connection()
+        if conn:
+            cursor = conn.cursor()
+            cursor.execute("UPDATE youtube SET selected = 'No' WHERE id = %s", (channel['id'],))
+            conn.commit()
+            cursor.close()
+            conn.close()
+        return
+
+    print_step(f"Scheduled media: {scheduled_media.get('media_name', 'Unknown')}")
+
+    # Get video from Drive using specific file_id
     drive_creds = authenticate_drive(channel['user_id'])
-    video_path, drive_file_id = None, None
+    video_path = None
     
-    if drive_creds and channel['google_drive_link']:
-        video_path, drive_file_id = get_oldest_video_file(drive_creds, channel)
+    if drive_creds and scheduled_media.get('file_id'):
+        video_path = download_specific_media(
+            drive_creds, 
+            scheduled_media['file_id'], 
+            scheduled_media['media_name']
+        )
     
-    # Fallback to local files
+    # Fallback to local files if specific download fails
     if not video_path:
         video_files = [
             f for f in os.listdir(TEMP_FOLDER)
@@ -491,20 +640,24 @@ async def process_youtube_channel(channel):
         ]
         if video_files:
             video_path = os.path.join(TEMP_FOLDER, video_files[0])
-            print_success(f"Using local file: {video_files[0]}")
+            print_warning(f"Using fallback local file: {video_files[0]}")
         else:
             print_error("No video files available")
-            update_channel_after_post(channel['id'])
             return
 
     # Upload to YouTube
     print_header("Uploading to YouTube")
-    if upload_video(youtube, video_path, channel_name):
+    
+    # Use media-specific title and caption if available
+    media_title = scheduled_media.get('title') or os.path.splitext(scheduled_media['media_name'])[0]
+    media_caption = scheduled_media.get('caption')
+    
+    if upload_video(youtube, video_path, channel_name, title=media_title, description=media_caption):
         # Cleanup
         print_header("Cleanup")
-        if drive_file_id and drive_creds:
+        if scheduled_media.get('file_id') and drive_creds:
             print_step("Removing file from Google Drive...")
-            if delete_file_from_drive(drive_file_id, drive_creds):
+            if delete_file_from_drive(scheduled_media['file_id'], drive_creds):
                 print_success("File removed from Drive")
             else:
                 print_warning("File uploaded but could not delete from Drive")
@@ -516,7 +669,8 @@ async def process_youtube_channel(channel):
         except Exception as e:
             print_warning(f"Could not delete local file: {str(e)}")
         
-        update_channel_after_post(channel['id'])
+        # Update database with specific media info (NEW!)
+        update_channel_after_post(channel['id'], scheduled_media['file_id'])
     else:
         print_error("Upload failed - keeping files")
 
@@ -562,7 +716,7 @@ async def main():
                 print_warning(f"Upload in {minutes}m {seconds}s - Running scheduler...")
                 await asyncio.sleep(over_time * 60)
                 try:
-                    subprocess.run(["python", os.path.join(os.path.dirname(__file__), "scheduler_youtube.py")])
+                    subprocess.run(["python", os.path.join(os.path.dirname(__file__), "scheduler_combined.py")])
                     print_success("Scheduler updated")
                 except subprocess.CalledProcessError as e:
                     print_error(f"Scheduler failed: {str(e)}")
@@ -584,7 +738,7 @@ async def main():
         print_header("Completed")
         print_success("Ready for next upload")
         await asyncio.sleep(2)
-        subprocess.run(["python", os.path.join(os.path.dirname(__file__), "scheduler_youtube.py")])
+        subprocess.run(["python", os.path.join(os.path.dirname(__file__), "scheduler_combined.py")])
 
 if __name__ == "__main__":
     import asyncio

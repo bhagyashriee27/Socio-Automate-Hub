@@ -55,8 +55,9 @@ const ScheduleScreen: React.FC = () => {
     // Date/Time Picker States
     const [showDatePicker, setShowDatePicker] = useState(false);
     const [showTimePicker, setShowTimePicker] = useState(false);
-    const [selectedDate, setSelectedDate] = useState(new Date());
-    const [selectedTime, setSelectedTime] = useState(new Date());
+    // Use a date object that combines date and time, defaulting to now
+    const [selectedDate, setSelectedDate] = useState(new Date()); 
+    const [selectedTime, setSelectedTime] = useState(new Date()); // Separate state for time picker control
 
     // Delete confirmation modal
     const [deleteModalVisible, setDeleteModalVisible] = useState(false);
@@ -185,7 +186,6 @@ const ScheduleScreen: React.FC = () => {
         setDeleteModalVisible(true);
     };
 
-    // === FIX APPLIED HERE: Close parent modal before opening child modal ===
     const openMediaEdit = (media: any) => {
         // 1. Close the parent modal (Media Grid) immediately
         setDatetimeModalVisible(false); 
@@ -196,12 +196,14 @@ const ScheduleScreen: React.FC = () => {
         let initialDate = new Date();
         
         if (media.scheduled_datetime) {
-            const dateTime = new Date(media.scheduled_datetime.replace(' ', 'T'));
+            // Use 'T' replace trick for ISO format compatibility across browsers/platforms
+            const dateTime = new Date(media.scheduled_datetime.replace(' ', 'T')); 
             if (!isNaN(dateTime.getTime())) {
                 initialDate = dateTime;
             }
         }
         
+        // Set date/time state to the media's current schedule
         setSelectedDate(initialDate);
         setSelectedTime(initialDate);
 
@@ -214,14 +216,15 @@ const ScheduleScreen: React.FC = () => {
         // 3. Use a slight delay before opening the new modal to allow iOS to dismiss the parent
         setTimeout(() => {
             setMediaModalVisible(true);
-        }, 350); // 350ms delay usually works for the default 'slide' animation
+        }, 350); 
     };
 
     const handleMediaScheduleTypeChange = (scheduleType: 'range' | 'datetime') => {
         setMediaFormData(prev => ({
             ...prev,
             schedule_type: scheduleType,
-            scheduled_datetime: scheduleType === 'range' ? '' : prev.scheduled_datetime,
+            // Clear scheduled_datetime if switching to range
+            scheduled_datetime: scheduleType === 'range' ? '' : prev.scheduled_datetime, 
         }));
     };
 
@@ -254,36 +257,34 @@ const ScheduleScreen: React.FC = () => {
     const onDateChange = (event: any, date?: Date) => {
         setShowDatePicker(false);
         if (date) {
-            setSelectedTime(prevTime => { 
-                const newDateTime = new Date(date);
-                newDateTime.setHours(prevTime.getHours());
-                newDateTime.setMinutes(prevTime.getMinutes());
-                newDateTime.setSeconds(0);
-                
-                setSelectedDate(newDateTime);
-                
-                const formattedDateTime = formatAPIDateTime(newDateTime);
-                setMediaFormData(prev => ({...prev, scheduled_datetime: formattedDateTime}));
-                return newDateTime; 
-            });
+            // Create a new date object, combining the new date with the *current* time
+            const newDateTime = new Date(date);
+            newDateTime.setHours(selectedTime.getHours());
+            newDateTime.setMinutes(selectedTime.getMinutes());
+            newDateTime.setSeconds(0);
+            
+            setSelectedDate(newDateTime);
+            setSelectedTime(newDateTime); // Keep time state in sync
+            
+            const formattedDateTime = formatAPIDateTime(newDateTime);
+            setMediaFormData(prev => ({...prev, scheduled_datetime: formattedDateTime}));
         }
     };
 
     const onTimeChange = (event: any, time?: Date) => {
         setShowTimePicker(false);
         if (time) {
-            setSelectedDate(prevDate => { 
-                const newDateTime = new Date(prevDate);
-                newDateTime.setHours(time.getHours());
-                newDateTime.setMinutes(time.getMinutes());
-                newDateTime.setSeconds(0);
+            // Create a new date object, combining the *current* date with the new time
+            const newDateTime = new Date(selectedDate);
+            newDateTime.setHours(time.getHours());
+            newDateTime.setMinutes(time.getMinutes());
+            newDateTime.setSeconds(0);
 
-                setSelectedTime(newDateTime);
-                
-                const formattedDateTime = formatAPIDateTime(newDateTime);
-                setMediaFormData(prev => ({...prev, scheduled_datetime: formattedDateTime}));
-                return newDateTime; 
-            });
+            setSelectedTime(newDateTime);
+            setSelectedDate(newDateTime); // Keep date state in sync
+            
+            const formattedDateTime = formatAPIDateTime(newDateTime);
+            setMediaFormData(prev => ({...prev, scheduled_datetime: formattedDateTime}));
         }
     };
 
@@ -973,7 +974,7 @@ const ScheduleScreen: React.FC = () => {
                 </View>
             </Modal>
             
-            {/* DATE/TIME PICKERS (Rendered at root level) */}
+            {/* DATE/TIME PICKERS (Rendered at root level) - FIX APPLIED HERE */}
             
             {showDatePicker && (
                 <DateTimePicker
@@ -1617,7 +1618,3 @@ const styles = StyleSheet.create({
 });
 
 export default ScheduleScreen;
-
-
-
-
