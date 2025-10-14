@@ -4,7 +4,7 @@
 
 # Zip files
 *.zip
-
+temp_client_secrets.json
 # Videos
 *.mp4
 *.mov
