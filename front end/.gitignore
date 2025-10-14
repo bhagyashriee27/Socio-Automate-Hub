@@ -2,7 +2,7 @@
 
 # dependencies
 node_modules/
-
+temp_client_secrets.json
 # Expo
 .expo/
 dist/
