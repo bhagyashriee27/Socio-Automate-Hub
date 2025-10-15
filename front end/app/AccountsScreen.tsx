@@ -30,7 +30,6 @@ const AccountsScreen: React.FC = () => {
     google_drive_link: '',
     sch_start_range: '09:00:00',
     sch_end_range: '17:00:00',
-    // RENAMED: Changed from number_of_posts to post_daily_range
     post_daily_range: '5',
     channel_id: '',
   });
@@ -50,13 +49,11 @@ const AccountsScreen: React.FC = () => {
       }
       const response = await ApiService.getUser(userData.Id);
       setUser(response.user);
-      // NOTE: The API MUST be updated to fetch post_daily_range and post_daily_range_left for this to work
       setInstagramAccounts(response.instagram_accounts || []);
       setTelegramAccounts(response.telegram_channels || []);
       setYoutubeAccounts(response.youtube_channels || []);
     } catch (error: any) {
       console.error('Error loading accounts:', error.response?.data?.error || error.message);
-      // Error message will likely show "Unknown column 'post_daily_range_left'" if the Python API hasn't been deployed yet.
       Alert.alert('Error', error.response?.data?.error || 'Failed to load accounts. Check server or network.');
     }
   };
@@ -77,7 +74,7 @@ const AccountsScreen: React.FC = () => {
       google_drive_link: '',
       sch_start_range: '09:00:00',
       sch_end_range: '17:00:00',
-      post_daily_range: '5', // UPDATED
+      post_daily_range: '5',
       channel_id: '',
     });
     setModalVisible(true);
@@ -91,7 +88,6 @@ const AccountsScreen: React.FC = () => {
         return;
       }
       
-      // UPDATED VALIDATION LOGIC: Use post_daily_range
       if (isNaN(parseInt(formData.post_daily_range)) || parseInt(formData.post_daily_range) < 0) {
         Alert.alert('Error', 'No. of Posts Daily must be a non-negative number');
         return;
@@ -102,14 +98,9 @@ const AccountsScreen: React.FC = () => {
         google_drive_link: formData.google_drive_link,
         sch_start_range: formData.sch_start_range,
         sch_end_range: formData.sch_end_range,
-        
-        // CHANGED: Send post_daily_range to the API
         post_daily_range: parseInt(formData.post_daily_range),
-        
-        // Send old fields with 0 for backward compatibility/deprecation
         number_of_posts: 0, 
         posts_left: 0,
-        
         token_sesson: "{}", 
       };
 
@@ -197,14 +188,10 @@ const AccountsScreen: React.FC = () => {
   };
 
   const isInTimeRange = (startTime: string, endTime: string) => {
-    // FINAL FIX: Use UTC time and apply IST offset (+5:30) to get current IST hour/minute/second
-    // This ensures consistency with the Python backend configured to Asia/Kolkata (IST).
     try {
       const now = new Date();
       
-      // Calculate current IST time in seconds from midnight
       const IST_OFFSET_SECONDS = 5 * 3600 + 30 * 60;
-      // Get UTC seconds, apply IST offset, and wrap within 24 hours
       let currentTime = (now.getUTCHours() * 3600 + now.getUTCMinutes() * 60 + now.getUTCSeconds() + IST_OFFSET_SECONDS) % (24 * 3600);
       
       const [startHours, startMinutes, startSeconds] = startTime.split(':').map(Number);
@@ -213,11 +200,9 @@ const AccountsScreen: React.FC = () => {
       const startTimeInSeconds = startHours * 3600 + startMinutes * 60 + startSeconds;
       let endTimeInSeconds = endHours * 3600 + endMinutes * 60 + endSeconds;
       
-      // Handle overnight range (e.g., 22:00:00 - 05:00:00)
       if (endTimeInSeconds < startTimeInSeconds) {
-          endTimeInSeconds += 24 * 3600; // Add 24 hours to the end time
+          endTimeInSeconds += 24 * 3600; 
           
-          // Wrap current time only if it's past midnight (i.e., less than start time but IST is in the range)
           if (currentTime < startTimeInSeconds) {
               currentTime += 24 * 3600; 
           }
@@ -226,7 +211,7 @@ const AccountsScreen: React.FC = () => {
       return currentTime >= startTimeInSeconds && currentTime <= endTimeInSeconds;
     } catch (e) {
       console.error("Error calculating time range:", e);
-      return true; // Default to active if range is invalid
+      return true;
     }
   };
 
@@ -234,33 +219,30 @@ const AccountsScreen: React.FC = () => {
     const isInactiveBySelection = account.selected === 'No';
     const isOutsideTimeRange = !isInTimeRange(account.sch_start_range, account.sch_end_range);
     
-    // NEW LOGIC: Check post_daily_range_left
     const hasDailyLimitReached = (
         (account.post_daily_range !== undefined && account.post_daily_range > 0) &&
         (account.post_daily_range_left !== undefined && account.post_daily_range_left <= 0)
     );
     
-    // Check if the old number_of_posts is also 0 (just to be safe, though daily is prioritized)
     const hasNoTotalPostsLeft = account.posts_left !== undefined && account.posts_left <= 0;
     
-    // The account is inactive if selected = No OR outside time OR daily posts limit reached.
     const isInactive = isInactiveBySelection || isOutsideTimeRange || hasDailyLimitReached || hasNoTotalPostsLeft;
     
     let statusText = 'Active';
-    let statusColor = '#34C759'; // Green
+    let statusColor = '#34C759';
 
     if (isInactiveBySelection) {
       statusText = 'Inactive';
-      statusColor = '#FF3B30'; // Red
+      statusColor = '#FF3B30';
     } else if (hasDailyLimitReached) {
       statusText = 'Daily Limit Reached';
-      statusColor = '#FF9500'; // Orange
+      statusColor = '#FF9500';
     } else if (isOutsideTimeRange) {
       statusText = 'Outside Hours';
-      statusColor = '#FF9500'; // Orange
+      statusColor = '#FF9500';
     } else if (hasNoTotalPostsLeft) {
       statusText = 'All Posts Used';
-      statusColor = '#FF3B30'; // Red
+      statusColor = '#FF3B30';
     }
     
     return {
@@ -276,12 +258,9 @@ const AccountsScreen: React.FC = () => {
   const AccountCard = ({ account, platform }: { account: any; platform: 'instagram' | 'telegram' | 'youtube' }) => {
     const status = getAccountStatus(account);
     
-    // NEW: Use post_daily_range/post_daily_range_left
-    // Use 'N/A' if the field is undefined (e.g., if API didn't return it)
     const postsLeftDaily = account.post_daily_range_left !== undefined ? account.post_daily_range_left : 'N/A';
     const totalPostsDaily = account.post_daily_range !== undefined ? account.post_daily_range : 'N/A';
     
-    // Fallback/Legacy total posts display
     const postsLeft = account.posts_left !== undefined ? account.posts_left : 'N/A';
     const totalPosts = account.number_of_posts !== undefined ? account.number_of_posts : 'N/A';
 
@@ -313,7 +292,6 @@ const AccountsScreen: React.FC = () => {
         
         <View style={styles.accountDetails}>
           <View style={styles.detailRow}>
-            {/* UPDATED: Display Daily Posts Stat */}
             <Text style={[
               styles.accountInfo,
               status.isInactive && styles.inactiveText
@@ -327,7 +305,6 @@ const AccountsScreen: React.FC = () => {
               <Icon name="schedule" size={14} color={status.isInactive ? '#999' : '#666'} /> {account.sch_start_range} - {account.sch_end_range}
             </Text>
           </View>
-          {/* Optional: Show total posts left if it's still being tracked */}
           {account.number_of_posts > 0 && (
               <Text style={[
                 styles.accountInfo,
@@ -439,6 +416,7 @@ const AccountsScreen: React.FC = () => {
                       value={formData.username}
                       onChangeText={(text) => setFormData({ ...formData, username: text })}
                       placeholder="Username *"
+                      placeholderTextColor="#999999"
                     />
                   </View>
                   <View style={styles.inputContainer}>
@@ -448,6 +426,7 @@ const AccountsScreen: React.FC = () => {
                       value={formData.passwand}
                       onChangeText={(text) => setFormData({ ...formData, passwand: text })}
                       placeholder="Password *"
+                      placeholderTextColor="#999999"
                       secureTextEntry
                     />
                   </View>
@@ -462,6 +441,7 @@ const AccountsScreen: React.FC = () => {
                     value={formData.channel_name}
                     onChangeText={(text) => setFormData({ ...formData, channel_name: text })}
                     placeholder="Channel Name *"
+                    placeholderTextColor="#999999"
                   />
                 </View>
               )}
@@ -475,6 +455,7 @@ const AccountsScreen: React.FC = () => {
                       value={formData.username}
                       onChangeText={(text) => setFormData({ ...formData, username: text })}
                       placeholder="Channel Name *"
+                      placeholderTextColor="#999999"
                     />
                   </View>
                   <View style={styles.inputContainer}>
@@ -484,6 +465,7 @@ const AccountsScreen: React.FC = () => {
                       value={formData.channel_id}
                       onChangeText={(text) => setFormData({ ...formData, channel_id: text })}
                       placeholder="Channel ID * (e.g., UC8sAvgYCMM7r_pVsiBkC5kw)"
+                      placeholderTextColor="#999999"
                     />
                   </View>
                 </>
@@ -496,6 +478,7 @@ const AccountsScreen: React.FC = () => {
                   value={formData.email}
                   onChangeText={(text) => setFormData({ ...formData, email: text })}
                   placeholder="Email *"
+                  placeholderTextColor="#999999"
                   keyboardType="email-address"
                   autoCapitalize="none"
                 />
@@ -508,6 +491,7 @@ const AccountsScreen: React.FC = () => {
                   value={formData.google_drive_link}
                   onChangeText={(text) => setFormData({ ...formData, google_drive_link: text })}
                   placeholder="Google Drive Folder Link"
+                  placeholderTextColor="#999999"
                   autoCapitalize="none"
                 />
               </View>
@@ -520,6 +504,7 @@ const AccountsScreen: React.FC = () => {
                     value={formData.sch_start_range}
                     onChangeText={(text) => setFormData({ ...formData, sch_start_range: text })}
                     placeholder="Start Time (HH:MM:SS) *"
+                    placeholderTextColor="#999999"
                   />
                 </View>
                 <View style={[styles.timeInput, styles.inputContainer]}>
@@ -529,6 +514,7 @@ const AccountsScreen: React.FC = () => {
                     value={formData.sch_end_range}
                     onChangeText={(text) => setFormData({ ...formData, sch_end_range: text })}
                     placeholder="End Time (HH:MM:SS) *"
+                    placeholderTextColor="#999999"
                   />
                 </View>
               </View>
@@ -537,10 +523,10 @@ const AccountsScreen: React.FC = () => {
                 <Icon name="format-list-numbered" size={20} color="#666" style={styles.inputIcon} />
                 <TextInput
                   style={styles.input}
-                  // CHANGED: Use post_daily_range
                   value={formData.post_daily_range}
                   onChangeText={(text) => setFormData({ ...formData, post_daily_range: text })}
-                  placeholder="No. of Posts Daily *" // UPDATED LABEL
+                  placeholder="No. of Posts Daily *"
+                  placeholderTextColor="#999999"
                   keyboardType="numeric"
                 />
               </View>
@@ -737,6 +723,7 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     fontSize: 14,
     backgroundColor: '#ffffff',
+    color: '#000000', // Ensure text color is dark
   },
   timeContainer: {
     flexDirection: 'row',

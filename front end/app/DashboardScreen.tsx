@@ -9,10 +9,11 @@ import {
   Alert,
   Modal,
   TextInput,
+  ActivityIndicator,
 } from 'react-native';
 import { useNavigation, NavigationProp } from '@react-navigation/native';
 import FontAwesome from 'react-native-vector-icons/FontAwesome';
-import MaterialIcons from 'react-native-vector-icons/MaterialIcons';
+import Icon from 'react-native-vector-icons/MaterialIcons'; // Updated Import
 import StorageService from '../utils/storage';
 import ApiService from '../services/api';
 import { User, InstagramAccount, TelegramAccount } from '../types';
@@ -49,28 +50,44 @@ const DashboardScreen: React.FC = () => {
     number_of_posts: '5',
     channel_id: '',
   });
-  const [isLoading, setIsLoading] = useState(true); // Add loading state for initial fetch
+  const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
     const fetchData = async () => {
+      console.log('DashboardScreen: Starting data fetch...');
       setIsLoading(true);
-      await loadUserDataWithRetry();
-      await loadDashboardData();
+
+      const userData = await loadUserDataWithRetry();
+
+      if (userData && userData.Id) {
+        console.log('DashboardScreen: User data loaded, loading dashboard...');
+        await loadDashboardData(userData);
+      } else {
+        console.error('DashboardScreen: No user data available');
+      }
+
       setIsLoading(false);
+      console.log('DashboardScreen: Data fetch complete');
     };
     fetchData();
   }, []);
 
-  const loadUserDataWithRetry = async (retries = 3, delay = 1000): Promise<void> => {
+  const loadUserDataWithRetry = async (retries = 3, delay = 1000): Promise<User | null> => {
     for (let attempt = 1; attempt <= retries; attempt++) {
       try {
         const userData = await StorageService.getUserData();
+        console.log(`Attempt ${attempt}: User data:`, userData);
+
         if (userData && userData.Id) {
           setUser(userData);
-          return;
+          console.log('User data loaded successfully:', userData.Id);
+          return userData;
+        } else {
+          console.warn(`Attempt ${attempt}: Invalid user data -`, userData);
         }
-        console.warn(`Attempt ${attempt}: No user data or user.Id found`);
+
         if (attempt < retries) {
+          console.log(`Retrying in ${delay}ms...`);
           await new Promise((resolve) => setTimeout(resolve, delay));
         }
       } catch (error) {
@@ -81,18 +98,25 @@ const DashboardScreen: React.FC = () => {
       }
     }
     console.error('Failed to load user data after retries');
+    Alert.alert('Error', 'Failed to load user data. Please log in again.');
     setUser(null);
+    return null;
   };
 
-  const loadDashboardData = async () => {
-    if (!user?.Id) {
+  const loadDashboardData = async (currentUser?: User | null) => {
+    const userToUse = currentUser || user;
+
+    if (!userToUse?.Id) {
       console.warn('No user ID available, skipping dashboard data fetch');
+      setRefreshing(false);
       return;
     }
+
     try {
       setRefreshing(true);
-      const response = await ApiService.getUser(user.Id);
-      const { instagram_accounts, telegram_channels, facebook_pages, youtube_channels } = response;
+      console.log('Fetching dashboard data for user:', userToUse.Id);
+      const response = await ApiService.getUser(userToUse.Id);
+      const { instagram_accounts = [], telegram_channels = [], facebook_pages = [], youtube_channels = [] } = response;
 
       const instagramActive = instagram_accounts.filter((acc: InstagramAccount) => acc.selected === 'Yes').length;
       const telegramActive = telegram_channels.filter((acc: TelegramAccount) => acc.selected === 'Yes').length;
@@ -138,8 +162,10 @@ const DashboardScreen: React.FC = () => {
 
   const onRefresh = async () => {
     setRefreshing(true);
-    await loadUserDataWithRetry();
-    await loadDashboardData();
+    const userData = await loadUserDataWithRetry();
+    if (userData) {
+      await loadDashboardData(userData);
+    }
     setRefreshing(false);
   };
 
@@ -181,8 +207,9 @@ const DashboardScreen: React.FC = () => {
         Alert.alert('Error', 'Please enter valid time in HH:MM:SS format (e.g., 09:00:00)');
         return;
       }
-      if (isNaN(parseInt(formData.number_of_posts)) || parseInt(formData.number_of_posts) <= 0) {
-        Alert.alert('Error', 'Number of posts must be a positive number');
+
+      if (isNaN(parseInt(formData.number_of_posts)) || parseInt(formData.number_of_posts) < 0) {
+        Alert.alert('Error', 'Number of posts must be a non-negative number');
         return;
       }
 
@@ -191,10 +218,10 @@ const DashboardScreen: React.FC = () => {
         google_drive_link: formData.google_drive_link,
         sch_start_range: formData.sch_start_range,
         sch_end_range: formData.sch_end_range,
-        number_of_posts: parseInt(formData.number_of_posts),
-        posts_left: parseInt(formData.number_of_posts),
+        post_daily_range: parseInt(formData.number_of_posts),
+        number_of_posts: 0,
+        posts_left: 0,
         token_sesson: "{}",
-        google_drive_token: "{}",
       };
 
       switch (modalType) {
@@ -220,7 +247,7 @@ const DashboardScreen: React.FC = () => {
           await ApiService.addTelegramAccount({
             channel_name: formData.channel_name,
             ...commonData,
-          });
+          } as any);
           Alert.alert('Success', 'Telegram channel added successfully!');
           break;
 
@@ -233,7 +260,7 @@ const DashboardScreen: React.FC = () => {
             username: formData.username,
             channel_id: formData.channel_id,
             ...commonData,
-          });
+          } as any);
           Alert.alert('Success', 'YouTube channel added successfully!');
           break;
       }
@@ -259,13 +286,13 @@ const DashboardScreen: React.FC = () => {
       weekday: 'long',
       month: 'long',
       day: 'numeric',
-      timeZone: 'Asia/Kolkata',
     });
   };
 
   if (isLoading) {
     return (
-      <View style={styles.container}>
+      <View style={styles.loadingContainer}>
+        <ActivityIndicator size="large" color="#1C2526" />
         <Text style={styles.loadingText}>Loading Dashboard...</Text>
       </View>
     );
@@ -335,12 +362,12 @@ const DashboardScreen: React.FC = () => {
           </TouchableOpacity>
           
           <TouchableOpacity style={styles.actionButton} onPress={() => navigation.navigate('Schedule')}>
-            <MaterialIcons name="calendar-month" size={20} color="#104d29ff" style={styles.icon} />
+            <Icon name="calendar-month" size={20} color="#104d29ff" style={styles.icon} />
             <Text style={styles.actionButtonText}>Update Schedules</Text>
           </TouchableOpacity>
           
           <TouchableOpacity style={styles.actionButton} onPress={() => navigation.navigate('Upload')}>
-            <MaterialIcons name="file-upload" size={20} color="#782d85ff" style={styles.icon} />
+            <Icon name="file-upload" size={20} color="#782d85ff" style={styles.icon} />
             <Text style={styles.actionButtonText}>Upload Media</Text>
           </TouchableOpacity>
           
@@ -370,97 +397,133 @@ const DashboardScreen: React.FC = () => {
                 'YouTube Channel'
               }
             </Text>
+            {/* START OF UPDATED SECTION */}
             <ScrollView style={styles.modalForm}>
               {modalType === 'instagram' && (
                 <>
-                  <TextInput
-                    style={styles.input}
-                    value={formData.username}
-                    onChangeText={(text) => setFormData({ ...formData, username: text })}
-                    placeholder="Username *"
-                  />
-                  <TextInput
-                    style={styles.input}
-                    value={formData.passwand}
-                    onChangeText={(text) => setFormData({ ...formData, passwand: text })}
-                    placeholder="Password *"
-                    secureTextEntry
-                  />
+                  <View style={styles.inputContainer}>
+                    <Icon name="person" size={20} color="#666" style={styles.inputIcon} />
+                    <TextInput
+                      style={styles.input}
+                      value={formData.username}
+                      onChangeText={(text) => setFormData({ ...formData, username: text })}
+                      placeholder="Username *"
+                      placeholderTextColor="#999999"
+                    />
+                  </View>
+                  <View style={styles.inputContainer}>
+                    <Icon name="lock" size={20} color="#666" style={styles.inputIcon} />
+                    <TextInput
+                      style={styles.input}
+                      value={formData.passwand}
+                      onChangeText={(text) => setFormData({ ...formData, passwand: text })}
+                      placeholder="Password *"
+                      placeholderTextColor="#999999"
+                      secureTextEntry
+                    />
+                  </View>
                 </>
               )}
 
               {modalType === 'telegram' && (
-                <>
+                <View style={styles.inputContainer}>
+                  <Icon name="chat" size={20} color="#666" style={styles.inputIcon} />
                   <TextInput
                     style={styles.input}
                     value={formData.channel_name}
                     onChangeText={(text) => setFormData({ ...formData, channel_name: text })}
                     placeholder="Channel Name *"
+                    placeholderTextColor="#999999"
                   />
-                </>
+                </View>
               )}
 
               {modalType === 'youtube' && (
                 <>
-                  <TextInput
-                    style={styles.input}
-                    value={formData.username}
-                    onChangeText={(text) => setFormData({ ...formData, username: text })}
-                    placeholder="Channel Name *"
-                  />
-                  <TextInput
-                    style={styles.input}
-                    value={formData.channel_id}
-                    onChangeText={(text) => setFormData({ ...formData, channel_id: text })}
-                    placeholder="Channel ID * (e.g., UC8sAvgYCMM7r_pVsiBkC5kw)"
-                  />
+                  <View style={styles.inputContainer}>
+                    <Icon name="video-library" size={20} color="#666" style={styles.inputIcon} />
+                    <TextInput
+                      style={styles.input}
+                      value={formData.username}
+                      onChangeText={(text) => setFormData({ ...formData, username: text })}
+                      placeholder="Channel Name *"
+                      placeholderTextColor="#999999"
+                    />
+                  </View>
+                  <View style={styles.inputContainer}>
+                    <Icon name="tag" size={20} color="#666" style={styles.inputIcon} />
+                    <TextInput
+                      style={styles.input}
+                      value={formData.channel_id}
+                      onChangeText={(text) => setFormData({ ...formData, channel_id: text })}
+                      placeholder="Channel ID * (e.g., UC8sAvgYCMM7r_pVsiBkC5kw)"
+                      placeholderTextColor="#999999"
+                    />
+                  </View>
                 </>
               )}
 
-              <TextInput
-                style={styles.input}
-                value={formData.email}
-                onChangeText={(text) => setFormData({ ...formData, email: text })}
-                placeholder="Email *"
-                keyboardType="email-address"
-                autoCapitalize="none"
-              />
+              <View style={styles.inputContainer}>
+                <Icon name="email" size={20} color="#666" style={styles.inputIcon} />
+                <TextInput
+                  style={styles.input}
+                  value={formData.email}
+                  onChangeText={(text) => setFormData({ ...formData, email: text })}
+                  placeholder="Email *"
+                  placeholderTextColor="#999999"
+                  keyboardType="email-address"
+                  autoCapitalize="none"
+                />
+              </View>
 
-              <TextInput
-                style={styles.input}
-                value={formData.google_drive_link}
-                onChangeText={(text) => setFormData({ ...formData, google_drive_link: text })}
-                placeholder="Google Drive Folder Link"
-                autoCapitalize="none"
-              />
+              <View style={styles.inputContainer}>
+                <Icon name="cloud" size={20} color="#666" style={styles.inputIcon} />
+                <TextInput
+                  style={styles.input}
+                  value={formData.google_drive_link}
+                  onChangeText={(text) => setFormData({ ...formData, google_drive_link: text })}
+                  placeholder="Google Drive Folder Link"
+                  placeholderTextColor="#999999"
+                  autoCapitalize="none"
+                />
+              </View>
 
               <View style={styles.timeContainer}>
-                <View style={styles.timeInput}>
+                <View style={[styles.timeInput, styles.inputContainer]}>
+                  <Icon name="access-time" size={20} color="#666" style={styles.inputIcon} />
                   <TextInput
                     style={styles.input}
                     value={formData.sch_start_range}
                     onChangeText={(text) => setFormData({ ...formData, sch_start_range: text })}
                     placeholder="Start Time (HH:MM:SS) *"
+                    placeholderTextColor="#999999"
                   />
                 </View>
-                <View style={styles.timeInput}>
+                <View style={[styles.timeInput, styles.inputContainer]}>
+                  <Icon name="access-time" size={20} color="#666" style={styles.inputIcon} />
                   <TextInput
                     style={styles.input}
                     value={formData.sch_end_range}
                     onChangeText={(text) => setFormData({ ...formData, sch_end_range: text })}
                     placeholder="End Time (HH:MM:SS) *"
+                    placeholderTextColor="#999999"
                   />
                 </View>
               </View>
 
-              <TextInput
-                style={styles.input}
-                value={formData.number_of_posts}
-                onChangeText={(text) => setFormData({ ...formData, number_of_posts: text })}
-                placeholder="Number of Posts *"
-                keyboardType="numeric"
-              />
+              <View style={styles.inputContainer}>
+                <Icon name="format-list-numbered" size={20} color="#666" style={styles.inputIcon} />
+                <TextInput
+                  style={styles.input}
+                  value={formData.number_of_posts}
+                  onChangeText={(text) => setFormData({ ...formData, number_of_posts: text })}
+                  placeholder="Number of Posts *"
+                  placeholderTextColor="#999999"
+                  keyboardType="numeric"
+                />
+              </View>
             </ScrollView>
+            {/* END OF UPDATED SECTION */}
             <View style={styles.modalActions}>
               <TouchableOpacity style={styles.cancelButton} onPress={() => setModalVisible(false)}>
                 <Text style={styles.cancelButtonText}>Cancel</Text>
@@ -480,8 +543,17 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#b4c5d8',
+  },
+  loadingContainer: {
+    flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
+    backgroundColor: '#b4c5d8',
+  },
+  loadingText: {
+    marginTop: 16,
+    fontSize: 16,
+    color: '#666',
   },
   scrollView: {
     flex: 1,
@@ -626,15 +698,26 @@ const styles = StyleSheet.create({
   modalForm: {
     maxHeight: 400,
   },
+  // UPDATED STYLE
   input: {
+    flex: 1,
     borderWidth: 1,
     borderColor: '#ddd',
     borderRadius: 8,
     paddingHorizontal: 12,
     paddingVertical: 12,
     fontSize: 14,
-    marginBottom: 12,
     backgroundColor: '#fff',
+    color: '#000000',
+  },
+  // NEW STYLES ADDED
+  inputContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  inputIcon: {
+    marginRight: 8,
   },
   timeContainer: {
     flexDirection: 'row',
@@ -643,6 +726,7 @@ const styles = StyleSheet.create({
   timeInput: {
     flex: 1,
   },
+  // END OF NEW STYLES
   modalActions: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -674,11 +758,6 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     fontSize: 14,
     fontWeight: '600',
-  },
-  loadingText: {
-    fontSize: 16,
-    color: '#666',
-    marginTop: 10,
   },
 });
 
