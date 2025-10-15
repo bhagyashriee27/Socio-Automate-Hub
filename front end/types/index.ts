@@ -4,6 +4,7 @@ export interface User {
   Name: string;
   email: string;
   expiry: string;
+  phone_number?: string; // Add this line
 }
 
 export interface LoginRequest {
@@ -117,6 +118,8 @@ export interface YouTubeAccount {
   post_daily_range_left: number;
   last_reset?: string;
 }
+
+
 
 // API Response types
 export interface ApiResponse<T = any> {

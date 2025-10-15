@@ -87,6 +87,38 @@ export class ApiService {
     }
   }
 
+  // Profile Update with OTP
+  static async sendProfileUpdateOtp(userId: number, newEmail: string): Promise<{ current_email: string; message: string }> {
+    try {
+      const response: AxiosResponse<{ current_email: string; message: string }> = await api.post('/profile/update/send-otp', {
+        user_id: userId,
+        new_email: newEmail,
+      });
+      return response.data;
+    } catch (error: any) {
+      throw new Error(error.response?.data?.error || 'Failed to send OTP');
+    }
+  }
+
+  static async verifyProfileUpdateOtp(
+    userId: number, 
+    otp: string, 
+    name: string, 
+    phoneNumber: string
+  ): Promise<{ message: string; email_updated: boolean }> {
+    try {
+      const response: AxiosResponse<{ message: string; email_updated: boolean }> = await api.post('/profile/update/verify-otp', {
+        user_id: userId,
+        otp: otp,
+        name: name,
+        phone_number: phoneNumber,
+      });
+      return response.data;
+    } catch (error: any) {
+      throw new Error(error.response?.data?.error || 'Failed to verify OTP');
+    }
+  }
+
   // Instagram Accounts
   static async getInstagramAccounts(): Promise<InstagramAccount[]> {
     try {
@@ -227,7 +259,7 @@ export class ApiService {
       throw new Error(error.response?.data?.error || 'Failed to add YouTube account');
     }
   }
-
+  
   // ✅ UPDATED: Added post_daily_range support for YouTube
   static async updateYouTubeAccount(id: number, accountData: Partial<YouTubeAccount> & { 
   post_daily_range?: number;
@@ -351,8 +383,12 @@ export class ApiService {
     }
   }
 
-  // User Profile
-  static async updateUser(id: number, userData: Partial<User>): Promise<ApiResponse> {
+  // User Profile - UPDATED: Added phone_number support
+  static async updateUser(id: number, userData: {
+    name?: string;
+    email?: string;
+    phone_number?: string;
+  }): Promise<ApiResponse> {
     try {
       const response: AxiosResponse<ApiResponse> = await api.patch(`/user/${id}`, userData);
       return response.data;

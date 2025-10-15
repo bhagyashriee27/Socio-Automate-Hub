@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
   View,
   Text,
@@ -19,6 +19,7 @@ import { StackNavigationProp } from '@react-navigation/stack';
 import { RootStackParamList } from '../types';
 import ApiService from '../services/api';
 import StorageService from '../utils/storage';
+import Icon from 'react-native-vector-icons/Ionicons';
 
 type LoginScreenNavigationProp = StackNavigationProp<RootStackParamList, 'Login'>;
 
@@ -27,11 +28,22 @@ const LoginScreen: React.FC = () => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
   const scrollY = useRef(new Animated.Value(0)).current;
+  const scrollViewRef = useRef<ScrollView>(null);
   const { height: windowHeight } = Dimensions.get('window');
   const stickyTop = 80;
   const initialTop = windowHeight * 0.45;
   const scrollThreshold = initialTop - stickyTop;
+
+  // Auto scroll down after 1.5 seconds
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      scrollViewRef.current?.scrollTo({ y: 200, animated: true });
+    }, 1500);
+
+    return () => clearTimeout(timer);
+  }, []);
 
   const handleLogin = async () => {
     if (!email || !password) {
@@ -49,12 +61,12 @@ const LoginScreen: React.FC = () => {
       const response = await ApiService.login({ email, password });
       
       // Store auth data
-      await StorageService.setAuthToken('dummy-token'); // You'll implement JWT later
+      await StorageService.setAuthToken('dummy-token');
       await StorageService.setUserData({
         Id: response.user_id,
         Name: response.name,
         email: email,
-        expiry: '', // You can get this from the API response
+        expiry: '',
       });
 
       // Navigate to main app
@@ -74,6 +86,10 @@ const LoginScreen: React.FC = () => {
     navigation.navigate('ForgotPassword');
   };
 
+  const toggleShowPassword = () => {
+    setShowPassword(!showPassword);
+  };
+
   return (
     <SafeAreaView style={styles.safeArea}>
       <Animated.View style={[styles.titleContainer, {
@@ -90,12 +106,14 @@ const LoginScreen: React.FC = () => {
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       >
         <ScrollView
+          ref={scrollViewRef}
           contentContainerStyle={styles.scrollContainer}
           onScroll={Animated.event(
             [{ nativeEvent: { contentOffset: { y: scrollY } } }],
             { useNativeDriver: false }
           )}
           scrollEventThrottle={16}
+          showsVerticalScrollIndicator={false}
         >
           <View style={styles.background} />
           <Animated.View style={[styles.formContainer, { opacity: scrollY.interpolate({
@@ -113,6 +131,7 @@ const LoginScreen: React.FC = () => {
                   value={email}
                   onChangeText={setEmail}
                   placeholder="Enter your email"
+                  placeholderTextColor="#999" // Added for better visibility
                   keyboardType="email-address"
                   autoCapitalize="none"
                   autoCorrect={false}
@@ -121,14 +140,27 @@ const LoginScreen: React.FC = () => {
 
               <View style={styles.inputContainer}>
                 <Text style={styles.label}>Enter Password</Text>
-                <TextInput
-                  style={styles.input}
-                  value={password}
-                  onChangeText={setPassword}
-                  placeholder="Enter your password"
-                  secureTextEntry
-                  autoCapitalize="none"
-                />
+                <View style={styles.passwordContainer}>
+                  <TextInput
+                    style={styles.passwordInput}
+                    value={password}
+                    onChangeText={setPassword}
+                    placeholder="Enter your password"
+                    placeholderTextColor="#999" // Added for better visibility
+                    secureTextEntry={!showPassword}
+                    autoCapitalize="none"
+                  />
+                  <TouchableOpacity
+                    style={styles.eyeButton}
+                    onPress={toggleShowPassword}
+                  >
+                    <Icon
+                      name={showPassword ? 'eye-off' : 'eye'}
+                      size={20}
+                      color="#666"
+                    />
+                  </TouchableOpacity>
+                </View>
               </View>
 
               {/* Forgot Password Link */}
@@ -167,7 +199,7 @@ const LoginScreen: React.FC = () => {
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
-    backgroundColor: '#03021eff', // Dark purple background as per the inferred design
+    backgroundColor: '#03021eff',
   },
   container: {
     flex: 1,
@@ -179,7 +211,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     backgroundColor: 'transparent',
-    height: 600, // Increased height for initial view
+    height: 600,
   },
   titleContainer: {
     position: 'absolute',
@@ -190,33 +222,33 @@ const styles = StyleSheet.create({
   },
   title: {
     fontSize: 45,
-    fontFamily: 'Times New Roman', // Consistent with your update
+    fontFamily: 'Times New Roman',
     fontWeight: 'bold',
-    color: '#e3d1e3ff', // Light purple for text, matching the design
+    color: '#e3d1e3ff',
     textAlign: 'center',
   },
   formContainer: {
-    backgroundColor: '#E6E6FA', // Whitish background for form, matching the design
+    backgroundColor: '#E6E6FA',
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
     padding: 20,
     marginTop: 20,
-    elevation: 5, // Shadow for Android
-    shadowColor: '#000', // Shadow for iOS
+    elevation: 5,
+    shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.2,
     shadowRadius: 4,
   },
   form: {
-    width: '100%', 
+    width: '100%',
   },
   subtitle: {
     fontSize: 28,
-    fontFamily: 'Times New Roman', // Applied for consistency
+    fontFamily: 'Times New Roman',
     fontWeight: 'bold',
     textAlign: 'center',
     marginBottom: 20,
-    color: '#03021eff', // Matches the form text color
+    color: '#03021eff',
   },
   inputContainer: {
     marginBottom: 15,
@@ -225,16 +257,35 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '500',
     marginBottom: 5,
-    color: '#03021eff', // Matches the form text color
+    color: '#03021eff',
   },
   input: {
     borderWidth: 1,
-    borderColor: '#D8BFD8', // Light purple border, matching the design
+    borderColor: '#D8BFD8',
     borderRadius: 8,
     paddingHorizontal: 12,
     paddingVertical: 10,
     fontSize: 16,
     backgroundColor: '#fff',
+    color: '#000', // Added for better text visibility
+  },
+  passwordContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#D8BFD8',
+    borderRadius: 8,
+    backgroundColor: '#fff',
+  },
+  passwordInput: {
+    flex: 1,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontSize: 16,
+    color: '#000', // Added for better text visibility
+  },
+  eyeButton: {
+    padding: 10,
   },
   forgotPasswordButton: {
     alignSelf: 'flex-end',
@@ -247,7 +298,7 @@ const styles = StyleSheet.create({
     textDecorationLine: 'underline',
   },
   button: {
-    backgroundColor: '#03021eff', // Matches the safeArea background for consistency
+    backgroundColor: '#03021eff',
     borderRadius: 8,
     paddingVertical: 12,
     alignItems: 'center',
@@ -259,7 +310,7 @@ const styles = StyleSheet.create({
   buttonText: {
     color: '#fff',
     fontSize: 20,
-    fontFamily: 'Times New Roman', // Applied for consistency
+    fontFamily: 'Times New Roman',
     fontWeight: '600',
   },
   linkButton: {
@@ -268,11 +319,11 @@ const styles = StyleSheet.create({
   },
   linkText: {
     fontSize: 16,
-    fontFamily: 'Times New Roman', // Applied for consistency
-    color: '#03021eff', // Matches the form text color
+    fontFamily: 'Times New Roman',
+    color: '#03021eff',
   },
   linkTextBold: {
-    color: '#03021eff', // Matches the form text color
+    color: '#03021eff',
     fontWeight: '600',
   },
 });

@@ -539,24 +539,19 @@ def signup():
 @app.route('/user/<int:user_id>', methods=['PATCH'])
 def update_user(user_id):
     """Update user details in the user table."""
+    if 'user_id' not in session or session['user_id'] != user_id:
+        return jsonify({"error": "Unauthorized access"}), 403
+        
     data = request.get_json()
     name = data.get('name')
-    password = data.get('password')
     email = data.get('email')
-    expiry = data.get('expiry')
+    phone_number = data.get('phone_number')
 
     # Validation
     if name and len(name) < 3:
         return jsonify({"error": "Name must be at least 3 characters long"}), 400
-    if password and len(password) < 8:
-        return jsonify({"error": "Password must be at least 8 characters long"}), 400
     if email and not validate_email(email):
         return jsonify({"error": "Invalid email format"}), 400
-    if expiry:
-        try:
-            datetime.strptime(expiry, '%Y-%m-%d')
-        except ValueError:
-            return jsonify({"error": "Invalid expiry date format (use YYYY-MM-DD)"}), 400
 
     conn = get_db_connection()
     if not conn:
@@ -571,7 +566,7 @@ def update_user(user_id):
             conn.close()
             return jsonify({"error": "User ID does not exist"}), 400
 
-        # Check for duplicate email
+        # Check for duplicate email if email is being changed
         if email:
             cursor.execute("SELECT Id FROM user WHERE email = %s AND Id != %s", (email, user_id))
             if cursor.fetchone():
@@ -585,15 +580,12 @@ def update_user(user_id):
         if name:
             updates.append("Name = %s")
             params.append(name)
-        if password:
-            updates.append("passward = %s")
-            params.append(password)
         if email:
             updates.append("email = %s")
             params.append(email)
-        if expiry:
-            updates.append("expiry = %s")
-            params.append(expiry)
+        if phone_number is not None:  # Allow empty string for phone number
+            updates.append("phone_number = %s")
+            params.append(phone_number)
 
         if not updates:
             cursor.close()
@@ -2744,6 +2736,219 @@ def add_youtube():
         conn.close()
         return jsonify({"error": f"Database error: {str(e)}"}), 500    
     
+@app.route('/profile/update/send-otp', methods=['POST'])
+def send_profile_update_otp():
+    """Send OTP to user's current email for profile update verification."""
+    data = request.get_json()
+    user_id = data.get('user_id')
+    new_email = data.get('new_email')
+
+    # Validation
+    if not user_id or not new_email:
+        return jsonify({"error": "User ID and new email are required"}), 400
+
+    if not validate_email(new_email):
+        return jsonify({"error": "Invalid email format"}), 400
+
+    conn = get_db_connection()
+    if not conn:
+        return jsonify({"error": "Database connection failed"}), 500
+
+    try:
+        cursor = conn.cursor(dictionary=True)
+        # Get user's current email
+        cursor.execute(
+            "SELECT Id, Name, email FROM user WHERE Id = %s", 
+            (user_id,)
+        )
+        user = cursor.fetchone()
+        cursor.close()
+
+        if not user:
+            conn.close()
+            return jsonify({"error": "User not found"}), 404
+
+        current_email = user['email']
+        
+        # Check if new email already exists
+        if new_email != current_email:
+            cursor = conn.cursor()
+            cursor.execute("SELECT Id FROM user WHERE email = %s AND Id != %s", (new_email, user_id))
+            if cursor.fetchone():
+                cursor.close()
+                conn.close()
+                return jsonify({"error": "Email already exists"}), 400
+
+        # Generate 6-digit OTP
+        otp = str(random.randint(100000, 999999))
+        
+        # Store OTP with timestamp (valid for 10 minutes)
+        otp_storage[current_email] = {
+            'otp': otp,
+            'timestamp': time.time(),
+            'user_id': user_id,
+            'new_email': new_email,
+            'purpose': 'profile_update'
+        }
+
+        # Send OTP via email to current email
+        send_profile_update_otp_email(current_email, otp, user['Name'], new_email)
+
+        conn.close()
+        return jsonify({
+            "message": "OTP sent successfully to your current email",
+            "current_email": current_email
+        }), 200
+
+    except mysql.connector.Error as e:
+        if conn:
+            conn.close()
+        return jsonify({"error": f"Database error: {str(e)}"}), 500
+    except Exception as e:
+        return jsonify({"error": f"Failed to send OTP: {str(e)}"}), 500
+
+@app.route('/profile/update/verify-otp', methods=['POST'])
+def verify_profile_update_otp():
+    """Verify OTP and update user profile."""
+    data = request.get_json()
+    user_id = data.get('user_id')
+    otp = data.get('otp')
+    name = data.get('name')
+    phone_number = data.get('phone_number')
+
+    # Validation
+    if not user_id or not otp:
+        return jsonify({"error": "User ID and OTP are required"}), 400
+
+    conn = get_db_connection()
+    if not conn:
+        return jsonify({"error": "Database connection failed"}), 500
+
+    try:
+        cursor = conn.cursor(dictionary=True)
+        # Get user's current email
+        cursor.execute(
+            "SELECT Id, Name, email FROM user WHERE Id = %s", 
+            (user_id,)
+        )
+        user = cursor.fetchone()
+        cursor.close()
+
+        if not user:
+            conn.close()
+            return jsonify({"error": "User not found"}), 404
+
+        current_email = user['email']
+
+        # Check if OTP exists and is valid
+        if current_email not in otp_storage:
+            conn.close()
+            return jsonify({"error": "OTP not found or expired"}), 400
+
+        stored_data = otp_storage[current_email]
+        
+        # Check if OTP is expired (10 minutes)
+        if time.time() - stored_data['timestamp'] > 600:  # 10 minutes
+            del otp_storage[current_email]
+            conn.close()
+            return jsonify({"error": "OTP has expired"}), 400
+
+        # Verify OTP and purpose
+        if (stored_data['otp'] != otp or 
+            stored_data['user_id'] != user_id or 
+            stored_data.get('purpose') != 'profile_update'):
+            conn.close()
+            return jsonify({"error": "Invalid OTP"}), 400
+
+        # Update user profile
+        new_email = stored_data.get('new_email', current_email)
+        
+        cursor = conn.cursor()
+        
+        # Build update query
+        updates = []
+        params = []
+        
+        if name and len(name) >= 3:
+            updates.append("Name = %s")
+            params.append(name)
+        
+        updates.append("email = %s")
+        params.append(new_email)
+        
+        if phone_number is not None:
+            updates.append("phone_number = %s")
+            params.append(phone_number)
+
+        query = f"UPDATE user SET {', '.join(updates)} WHERE Id = %s"
+        params.append(user_id)
+        
+        cursor.execute(query, params)
+        conn.commit()
+        cursor.close()
+        conn.close()
+
+        # Clear OTP after successful update
+        del otp_storage[current_email]
+
+        return jsonify({
+            "message": "Profile updated successfully",
+            "email_updated": new_email != current_email
+        }), 200
+
+    except mysql.connector.Error as e:
+        if conn:
+            conn.close()
+        return jsonify({"error": f"Database error: {str(e)}"}), 500
+
+def send_profile_update_otp_email(email: str, otp: str, user_name: str, new_email: str):
+    """Send OTP email for profile update verification."""
+    try:
+        # Email configuration
+        smtp_server = "smtp.gmail.com"
+        smtp_port = 587
+        sender_email = "otpsender191@gmail.com"
+        sender_password = "euwd ghss ahwy rblq"
+
+        # Create message
+        message = MIMEMultipart()
+        message["From"] = f"Socio-Automate Hub <{sender_email}>"
+        message["To"] = email
+        message["Subject"] = "Profile Update Verification - Socio-Automate Hub"
+
+        # Email body
+        body = f"""
+        <html>
+            <body>
+                <h2>Profile Update Request</h2>
+                <p>Hello {user_name},</p>
+                <p>You have requested to update your profile information.</p>
+                <p>Your email will be changed to: <strong>{new_email}</strong></p>
+                <p>Please use the following OTP to verify this change:</p>
+                <h1 style="color: #007AFF; font-size: 32px; text-align: center; letter-spacing: 5px;">{otp}</h1>
+                <p>This OTP is valid for 10 minutes.</p>
+                <p>If you didn't request this change, please ignore this email or contact our support team immediately.</p>
+                <br>
+                <p>Best regards,<br>Socio-Automate Hub Team</p>
+            </body>
+        </html>
+        """
+
+        message.attach(MIMEText(body, "html"))
+
+        # Send email
+        with smtplib.SMTP(smtp_server, smtp_port) as server:
+            server.starttls()
+            server.login(sender_email, sender_password)
+            server.send_message(message)
+
+        print(f"Profile update OTP email sent to {email}")
+        
+    except Exception as e:
+        print(f"Failed to send profile update email: {str(e)}")
+        raise e
+    
+        
 @app.route('/youtube/<int:record_id>', methods=['DELETE'])
 def delete_youtube(record_id):
     """Delete a YouTube channel."""
@@ -2782,7 +2987,7 @@ def get_user(user_id):
     try:
         cursor = conn.cursor(dictionary=True)
         # Fetch user details
-        cursor.execute("SELECT Id, Name, email, expiry FROM user WHERE Id = %s", (user_id,))
+        cursor.execute("SELECT Id, Name, email, expiry, phone_number FROM user WHERE Id = %s", (user_id,))
         user = cursor.fetchone()
         if not user:
             cursor.close()
