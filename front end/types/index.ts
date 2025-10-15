@@ -44,6 +44,7 @@ export interface InstagramAccount {
   // ADD THESE NEW FIELDS:
   post_daily_range: number;
   post_daily_range_left: number;
+  custom_schedule_data?: string; // ADD THIS LINE
   last_reset?: string;
 }
 
@@ -65,6 +66,7 @@ export interface TelegramAccount {
   post_daily_range: number;
   post_daily_range_left: number;
   last_reset?: string;
+  custom_schedule_data?: string;
 }
 
 export interface FacebookAccount {
@@ -89,6 +91,7 @@ export interface FacebookAccount {
   // ADD THESE NEW FIELDS:
   post_daily_range: number;
   post_daily_range_left: number;
+  custom_schedule_data?: string;
   last_reset?: string;
 }
 
@@ -110,6 +113,7 @@ export interface YouTubeAccount {
   token_drive: string;
   // ADD THESE NEW FIELDS:
   post_daily_range: number;
+  custom_schedule_data?: string;
   post_daily_range_left: number;
   last_reset?: string;
 }

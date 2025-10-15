@@ -15,7 +15,7 @@ import {
 import Ionicons from 'react-native-vector-icons/Ionicons';
 import ApiService from '../services/api';
 import StorageService from '../utils/storage';
-import { User, InstagramAccount, TelegramAccount } from '../types';
+import { User, InstagramAccount, TelegramAccount, YouTubeAccount } from '../types';
 
 const AnimatedTouchableOpacity = Animated.createAnimatedComponent(TouchableOpacity);
 
@@ -25,6 +25,7 @@ const Profile: React.FC<{ navigation: any }> = ({ navigation }) => {
   const [user, setUser] = useState<User | null>(null);
   const [instagramAccounts, setInstagramAccounts] = useState<InstagramAccount[]>([]);
   const [telegramAccounts, setTelegramAccounts] = useState<TelegramAccount[]>([]);
+  const [youtubeAccounts, setYoutubeAccounts] = useState<YouTubeAccount[]>([]); // Add this line
   const [fadeAnim] = useState(new Animated.Value(0));
   const [slideAnim] = useState(new Animated.Value(50));
   const [logoutScaleAnim] = useState(new Animated.Value(1));
@@ -61,9 +62,10 @@ const Profile: React.FC<{ navigation: any }> = ({ navigation }) => {
       setUser(response.user);
       setInstagramAccounts(response.instagram_accounts || []);
       setTelegramAccounts(response.telegram_channels || []);
+      setYoutubeAccounts(response.youtube_channels || []); // Add this line
     } catch (error: any) {
       Alert.alert('Error', 'Failed to load profile data. Check server or network.');
-      console.error('Load profile error:', error); // Debug log
+      console.error('Load profile error:', error);
     }
   };
 
@@ -192,8 +194,24 @@ const Profile: React.FC<{ navigation: any }> = ({ navigation }) => {
     endTime.setHours(endHours, endMinutes, endSeconds, 0);
     const isInactive = account.selected === 'No' || now > endTime;
 
+    // Get platform icon and display name
+    const getPlatformInfo = () => {
+      switch (platform) {
+        case 'Instagram':
+          return { icon: 'logo-instagram', name: account.username };
+        case 'Telegram':
+          return { icon: 'paper-plane', name: account.channel_name };
+        case 'YouTube':
+          return { icon: 'logo-youtube', name: account.username };
+        default:
+          return { icon: 'help-circle', name: 'Unknown' };
+      }
+    };
+
+    const platformInfo = getPlatformInfo();
+
     return (
-      <Animated.View 
+      <Animated.View
         style={[
           styles.accountItem,
           {
@@ -215,13 +233,13 @@ const Profile: React.FC<{ navigation: any }> = ({ navigation }) => {
           <View style={styles.accountInfo}>
             <Text style={styles.accountPlatform}>
               <Ionicons
-                name={platform === 'Instagram' ? 'logo-instagram' : 'paper-plane'}
+                name={platformInfo.icon}
                 size={12}
                 color="#1C2526"
               /> {platform}
             </Text>
             <Text style={styles.accountName}>
-              {platform === 'Instagram' ? account.username : account.channel_name}
+              {platformInfo.name}
             </Text>
             <Text style={[styles.accountStatus, { color: isInactive ? '#FF3B30' : '#34C759' }]}>
               <Ionicons
@@ -244,7 +262,7 @@ const Profile: React.FC<{ navigation: any }> = ({ navigation }) => {
     instagramAccounts.forEach((account, index) => {
       activities.push({
         text: `Posted on Instagram (${account.username})`,
-        time: `${index + 1}h ago`,
+        time: `${index + 1}2m ago`,
         icon: 'logo-instagram',
       });
     });
@@ -254,8 +272,18 @@ const Profile: React.FC<{ navigation: any }> = ({ navigation }) => {
       const igCount = instagramAccounts.length;
       activities.push({
         text: `Scheduled post on Telegram (${account.channel_name})`,
-        time: `${igCount + index + 1}h ago`,
+        time: `${igCount + index + 3}h ago`,
         icon: 'paper-plane',
+      });
+    });
+
+    // Add activities based on YouTube accounts
+    youtubeAccounts.forEach((account, index) => { // Add this section
+      const totalCount = instagramAccounts.length + telegramAccounts.length;
+      activities.push({
+        text: `Uploaded video on YouTube (${account.username})`,
+        time: `${totalCount + index + 5}h ago`,
+        icon: 'logo-youtube',
       });
     });
 
@@ -275,8 +303,8 @@ const Profile: React.FC<{ navigation: any }> = ({ navigation }) => {
         </Text>
         <View style={styles.activityList}>
           {activities.slice(0, 5).map((activity, index) => (
-            <Animated.View 
-              key={index} 
+            <Animated.View
+              key={index}
               style={[
                 styles.activityItem,
                 {
@@ -357,7 +385,7 @@ const Profile: React.FC<{ navigation: any }> = ({ navigation }) => {
             ]}>
               <Ionicons name="link" size={20} color="#1C2526" /> Linked Accounts
             </Animated.Text>
-            {[...instagramAccounts, ...telegramAccounts].length === 0 ? (
+            {[...instagramAccounts, ...telegramAccounts, ...youtubeAccounts].length === 0 ? ( // Update this line
               <Animated.Text style={[
                 styles.noAccounts,
                 {
@@ -378,6 +406,9 @@ const Profile: React.FC<{ navigation: any }> = ({ navigation }) => {
                 ))}
                 {telegramAccounts.map((account) => (
                   <AccountCard key={account.id} account={account} platform="Telegram" />
+                ))}
+                {youtubeAccounts.map((account) => ( // Add this section
+                  <AccountCard key={account.id} account={account} platform="YouTube" />
                 ))}
               </Animated.View>
             )}
@@ -401,11 +432,11 @@ const Profile: React.FC<{ navigation: any }> = ({ navigation }) => {
                 <Ionicons name="stats-chart" size={18} color="#1C2526" /> Account Stats
               </Text>
               <Text style={styles.statValue}>
-                {instagramAccounts.length + telegramAccounts.length} Accounts
+                {instagramAccounts.length + telegramAccounts.length + youtubeAccounts.length} Accounts {/* Update this line */}
               </Text>
             </View>
             <View style={styles.passwordLinkContainer}>
-              <Text 
+              <Text
                 style={styles.passwordLinkText}
                 onPress={handleForgotPassword}
               >
@@ -415,7 +446,7 @@ const Profile: React.FC<{ navigation: any }> = ({ navigation }) => {
           </View>
 
           {/* Dynamic Logout Button */}
-          <AnimatedTouchableOpacity 
+          <AnimatedTouchableOpacity
             style={[
               styles.logoutButton,
               {
@@ -426,7 +457,7 @@ const Profile: React.FC<{ navigation: any }> = ({ navigation }) => {
                 ],
                 backgroundColor: isLoggingOut ? '#ccc' : '#FF3B30',
               }
-            ]} 
+            ]}
             onPress={handleLogout}
             activeOpacity={0.7}
             disabled={isLoggingOut}

@@ -13,7 +13,7 @@ import {
 } from 'react-native';
 import { useNavigation, NavigationProp } from '@react-navigation/native';
 import FontAwesome from 'react-native-vector-icons/FontAwesome';
-import Icon from 'react-native-vector-icons/MaterialIcons'; // Updated Import
+import Icon from 'react-native-vector-icons/MaterialIcons';
 import StorageService from '../utils/storage';
 import ApiService from '../services/api';
 import { User, InstagramAccount, TelegramAccount } from '../types';
@@ -36,6 +36,10 @@ const DashboardScreen: React.FC = () => {
     postsToday: 0,
     instagramAccounts: 0,
     telegramAccounts: 0,
+    youtubeAccounts: 0,
+    facebookAccounts: 0,
+    dailyPostsLeft: 0,
+    postsScheduledToday: 0,
   });
   const [modalVisible, setModalVisible] = useState(false);
   const [modalType, setModalType] = useState<'instagram' | 'telegram' | 'youtube'>('instagram');
@@ -103,54 +107,149 @@ const DashboardScreen: React.FC = () => {
     return null;
   };
 
+  const isInTimeRange = (startTime: string, endTime: string) => {
+    try {
+      const now = new Date();
+      
+      const IST_OFFSET_SECONDS = 5 * 3600 + 30 * 60;
+      let currentTime = (now.getUTCHours() * 3600 + now.getUTCMinutes() * 60 + now.getUTCSeconds() + IST_OFFSET_SECONDS) % (24 * 3600);
+      
+      const [startHours, startMinutes, startSeconds] = startTime.split(':').map(Number);
+      const [endHours, endMinutes, endSeconds] = endTime.split(':').map(Number);
+      
+      const startTimeInSeconds = startHours * 3600 + startMinutes * 60 + startSeconds;
+      let endTimeInSeconds = endHours * 3600 + endMinutes * 60 + endSeconds;
+      
+      if (endTimeInSeconds < startTimeInSeconds) {
+          endTimeInSeconds += 24 * 3600; 
+          
+          if (currentTime < startTimeInSeconds) {
+              currentTime += 24 * 3600; 
+          }
+      }
+      
+      return currentTime >= startTimeInSeconds && currentTime <= endTimeInSeconds;
+    } catch (e) {
+      console.error("Error calculating time range:", e);
+      return true; // Default to true to avoid incorrectly marking as inactive
+    }
+  };
+
   const loadDashboardData = async (currentUser?: User | null) => {
     const userToUse = currentUser || user;
-
+  
     if (!userToUse?.Id) {
       console.warn('No user ID available, skipping dashboard data fetch');
       setRefreshing(false);
       return;
     }
-
+  
     try {
       setRefreshing(true);
       console.log('Fetching dashboard data for user:', userToUse.Id);
       const response = await ApiService.getUser(userToUse.Id);
       const { instagram_accounts = [], telegram_channels = [], facebook_pages = [], youtube_channels = [] } = response;
-
-      const instagramActive = instagram_accounts.filter((acc: InstagramAccount) => acc.selected === 'Yes').length;
-      const telegramActive = telegram_channels.filter((acc: TelegramAccount) => acc.selected === 'Yes').length;
-      const facebookActive = facebook_pages.filter((acc: any) => acc.selected === 'Yes').length;
-      const youtubeActive = youtube_channels.filter((acc: any) => acc.selected === 'Yes').length;
-
+  
+      const instagramTotal = instagram_accounts.length;
+      const telegramTotal = telegram_channels.length;
+      const facebookTotal = facebook_pages.length;
+      const youtubeTotal = youtube_channels.length;
+  
+      const instagramActive = instagram_accounts.filter((acc: InstagramAccount) => {
+        if (acc.selected !== 'Yes') return false;
+        return isInTimeRange(acc.sch_start_range, acc.sch_end_range);
+      }).length;
+  
+      const telegramActive = telegram_channels.filter((acc: TelegramAccount) => {
+        if (acc.selected !== 'Yes') return false;
+        return isInTimeRange(acc.sch_start_range, acc.sch_end_range);
+      }).length;
+  
+      const facebookActive = facebook_pages.filter((acc: any) => {
+        if (acc.selected !== 'Yes') return false;
+        return isInTimeRange(acc.sch_start_range, acc.sch_end_range);
+      }).length;
+  
+      const youtubeActive = youtube_channels.filter((acc: any) => {
+        if (acc.selected !== 'Yes') return false;
+        return isInTimeRange(acc.sch_start_range, acc.sch_end_range);
+      }).length;
+  
       const today = new Date();
       today.setHours(0, 0, 0, 0);
       const tomorrow = new Date(today);
       tomorrow.setDate(today.getDate() + 1);
+  
+      const countPostsCompletedToday = (accounts: any[]) => {
+        let completedToday = 0;
+        accounts.forEach((acc: any) => {
+          if (acc.custom_schedule_data) {
+            try {
+              // The data might already be an object/array if the server sends it parsed
+              const scheduleData = typeof acc.custom_schedule_data === 'string' 
+                ? JSON.parse(acc.custom_schedule_data) 
+                : acc.custom_schedule_data;
 
+              if (Array.isArray(scheduleData)) {
+                scheduleData.forEach((item: any) => {
+                  if (item.status === 'completed' && item.upload_time) {
+                    const uploadTime = new Date(item.upload_time.replace(' ', 'T')); // Ensure ISO 8601 format
+                    if (uploadTime >= today && uploadTime < tomorrow) {
+                      completedToday++;
+                    }
+                  }
+                });
+              }
+            } catch (error) {
+              console.error('Error parsing custom_schedule_data:', error);
+            }
+          }
+        });
+        return completedToday;
+      };
+  
+      const postsCompletedToday = 
+        countPostsCompletedToday(instagram_accounts) +
+        countPostsCompletedToday(telegram_channels) +
+        countPostsCompletedToday(facebook_pages) +
+        countPostsCompletedToday(youtube_channels);
+  
+      const calculateDailyPostsLeft = (accounts: any[]) => {
+        return accounts.reduce((total: number, acc: any) => {
+          const dailyLeft = parseInt(acc.post_daily_range_left) || 0;
+          return total + (dailyLeft > 0 ? dailyLeft : 0);
+        }, 0);
+      };
+  
+      const dailyPostsLeft = 
+        calculateDailyPostsLeft(instagram_accounts) +
+        calculateDailyPostsLeft(telegram_channels) +
+        calculateDailyPostsLeft(facebook_pages) +
+        calculateDailyPostsLeft(youtube_channels);
+  
       const countPostsToday = (accounts: any[]) =>
         accounts.filter((acc: any) => {
           if (!acc.next_post_time) return false;
-          const postTime = new Date(acc.next_post_time);
+          const postTime = new Date(acc.next_post_time.replace(' ', 'T'));
           return postTime >= today && postTime < tomorrow;
         }).length;
-
-      const postsToday =
+  
+      const postsScheduledToday =
         countPostsToday(instagram_accounts) +
         countPostsToday(telegram_channels) +
         countPostsToday(facebook_pages) +
         countPostsToday(youtube_channels);
-
+  
       setStats({
-        totalAccounts:
-          instagram_accounts.length +
-          telegram_channels.length +
-          facebook_pages.length +
-          youtube_channels.length,
+        totalAccounts: instagramTotal + telegramTotal + facebookTotal + youtubeTotal,
         activeSchedules: instagramActive + telegramActive + facebookActive + youtubeActive,
-        postsToday,
-        instagramAccounts: instagram_accounts.length,
-        telegramAccounts: telegram_channels.length,
+        postsToday: postsCompletedToday,
+        instagramAccounts: instagramTotal,
+        telegramAccounts: telegramTotal,
+        youtubeAccounts: youtubeTotal,
+        facebookAccounts: facebookTotal,
+        dailyPostsLeft: dailyPostsLeft,
+        postsScheduledToday: postsScheduledToday,
       });
     } catch (error: any) {
       console.error('Error loading dashboard data:', error);
@@ -318,32 +417,51 @@ const DashboardScreen: React.FC = () => {
             horizontal
             showsHorizontalScrollIndicator={false}
             style={styles.statsGrid}
-            contentContainerStyle={styles.statsGridContent}
-          >
+            contentContainerStyle={styles.statsGridContent}>
             <StatCard
               title="Total Accounts"
               value={stats.totalAccounts}
               color="#070840ff"
             />
             <StatCard
-              title="Active Schedules"
+              title="Active Now"
               value={stats.activeSchedules}
-              color="#070840ff"
+              color="#34C759"
             />
             <StatCard
               title="Posts Today"
               value={stats.postsToday}
-              color="#070840ff"
+              color="#007AFF"
             />
             <StatCard
-              title="Instagram Accounts"
+              title="Daily Posts Left"
+              value={stats.dailyPostsLeft}
+              color="#FF9500"
+            />
+            <StatCard
+              title="Scheduled Today"
+              value={stats.postsScheduledToday}
+              color="#5856D6"
+            />
+            <StatCard
+              title="Instagram"
               value={stats.instagramAccounts}
-              color="#070840ff"
+              color="#E4405F"
             />
             <StatCard
-              title="Telegram Accounts"
+              title="Telegram"
               value={stats.telegramAccounts}
-              color="#070840ff"
+              color="#0088cc"
+            />
+            <StatCard
+              title="YouTube"
+              value={stats.youtubeAccounts}
+              color="#FF0000"
+            />
+            <StatCard
+              title="Facebook"
+              value={stats.facebookAccounts}
+              color="#1877F2"
             />
           </ScrollView>
         </View>
@@ -397,7 +515,6 @@ const DashboardScreen: React.FC = () => {
                 'YouTube Channel'
               }
             </Text>
-            {/* START OF UPDATED SECTION */}
             <ScrollView style={styles.modalForm}>
               {modalType === 'instagram' && (
                 <>
@@ -523,7 +640,6 @@ const DashboardScreen: React.FC = () => {
                 />
               </View>
             </ScrollView>
-            {/* END OF UPDATED SECTION */}
             <View style={styles.modalActions}>
               <TouchableOpacity style={styles.cancelButton} onPress={() => setModalVisible(false)}>
                 <Text style={styles.cancelButtonText}>Cancel</Text>
@@ -698,7 +814,6 @@ const styles = StyleSheet.create({
   modalForm: {
     maxHeight: 400,
   },
-  // UPDATED STYLE
   input: {
     flex: 1,
     borderWidth: 1,
@@ -710,7 +825,6 @@ const styles = StyleSheet.create({
     backgroundColor: '#fff',
     color: '#000000',
   },
-  // NEW STYLES ADDED
   inputContainer: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -726,7 +840,6 @@ const styles = StyleSheet.create({
   timeInput: {
     flex: 1,
   },
-  // END OF NEW STYLES
   modalActions: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -760,5 +873,6 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
 });
+
 
 export default DashboardScreen;
