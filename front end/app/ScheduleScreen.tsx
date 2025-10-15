@@ -14,6 +14,7 @@ import {
     FlatList,
     Image,
     Platform,
+    SafeAreaView,
 } from 'react-native';
 import Ionicons from 'react-native-vector-icons/Ionicons';
 import DateTimePicker from '@react-native-community/datetimepicker';
@@ -48,15 +49,15 @@ const ScheduleScreen: React.FC = () => {
     const [selectedMedia, setSelectedMedia] = useState<any>(null);
     const [mediaModalVisible, setMediaModalVisible] = useState(false);
     const [mediaFormData, setMediaFormData] = useState({
-        schedule_type: 'datetime',
+        schedule_type: 'datetime' as 'range' | 'datetime',
         scheduled_datetime: '',
         caption: '', 
     });
 
-    // Date/Time Picker States
+    // IMPROVED Date/Time Picker States
     const [showDatePicker, setShowDatePicker] = useState(false);
     const [showTimePicker, setShowTimePicker] = useState(false);
-    const [selectedDate, setSelectedDate] = useState(new Date()); 
+    const [selectedDate, setSelectedDate] = useState(new Date());
     const [selectedTime, setSelectedTime] = useState(new Date());
 
     // Delete confirmation modal
@@ -223,6 +224,73 @@ const ScheduleScreen: React.FC = () => {
         }));
     };
 
+    // IMPROVED: Date/Time Picker Handlers
+    const handleDateChange = (event: any, date?: Date) => {
+        // For Android, dismiss the picker after selection
+        if (Platform.OS === 'android') {
+            setShowDatePicker(false);
+        }
+
+        if (date) {
+            const newDate = date;
+            // Preserve time part from selectedTime for combining
+            const currentTime = selectedTime;
+            newDate.setHours(currentTime.getHours());
+            newDate.setMinutes(currentTime.getMinutes());
+            newDate.setSeconds(currentTime.getSeconds());
+
+            setSelectedDate(newDate);
+            updateScheduledDateTime(newDate, currentTime);
+        }
+    };
+
+    const handleTimeChange = (event: any, time?: Date) => {
+        // For Android, dismiss the picker after selection
+        if (Platform.OS === 'android') {
+            setShowTimePicker(false);
+        }
+
+        if (time) {
+            const newTime = time;
+            // Preserve date part from selectedDate for combining
+            const currentDate = selectedDate;
+
+            const newDateTime = new Date(currentDate);
+            newDateTime.setHours(newTime.getHours());
+            newDateTime.setMinutes(newTime.getMinutes());
+            newDateTime.setSeconds(newTime.getSeconds());
+
+            setSelectedTime(newTime);
+            updateScheduledDateTime(currentDate, newTime);
+        }
+    };
+
+    const updateScheduledDateTime = (date: Date, time: Date) => {
+        const scheduledDate = new Date(date);
+        scheduledDate.setHours(time.getHours());
+        scheduledDate.setMinutes(time.getMinutes());
+        scheduledDate.setSeconds(time.getSeconds());
+        scheduledDate.setMilliseconds(0);
+
+        const year = scheduledDate.getFullYear();
+        const month = String(scheduledDate.getMonth() + 1).padStart(2, '0');
+        const day = String(scheduledDate.getDate()).padStart(2, '0');
+        const hours = String(scheduledDate.getHours()).padStart(2, '0');
+        const minutes = String(scheduledDate.getMinutes()).padStart(2, '0');
+        const seconds = String(scheduledDate.getSeconds()).padStart(2, '0');
+
+        const formattedDateTime = `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
+        setMediaFormData(prev => ({ ...prev, scheduled_datetime: formattedDateTime }));
+    };
+
+    const openDatePicker = () => {
+        setShowDatePicker(true);
+    }
+
+    const openTimePicker = () => {
+        setShowTimePicker(true);
+    }
+
     const formatDate = (date: Date) => {
         return date.toLocaleDateString('en-US', {
             year: 'numeric',
@@ -247,38 +315,6 @@ const ScheduleScreen: React.FC = () => {
         const minutes = String(date.getMinutes()).padStart(2, '0');
         const seconds = String(date.getSeconds()).padStart(2, '0');
         return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
-    };
-
-    const onDateChange = (event: any, date?: Date) => {
-        setShowDatePicker(false);
-        if (date) {
-            const newDateTime = new Date(date);
-            newDateTime.setHours(selectedTime.getHours());
-            newDateTime.setMinutes(selectedTime.getMinutes());
-            newDateTime.setSeconds(0);
-            
-            setSelectedDate(newDateTime);
-            setSelectedTime(newDateTime);
-            
-            const formattedDateTime = formatAPIDateTime(newDateTime);
-            setMediaFormData(prev => ({...prev, scheduled_datetime: formattedDateTime}));
-        }
-    };
-
-    const onTimeChange = (event: any, time?: Date) => {
-        setShowTimePicker(false);
-        if (time) {
-            const newDateTime = new Date(selectedDate);
-            newDateTime.setHours(time.getHours());
-            newDateTime.setMinutes(time.getMinutes());
-            newDateTime.setSeconds(0);
-
-            setSelectedTime(newDateTime);
-            setSelectedDate(newDateTime);
-            
-            const formattedDateTime = formatAPIDateTime(newDateTime);
-            setMediaFormData(prev => ({...prev, scheduled_datetime: formattedDateTime}));
-        }
     };
 
     const saveMediaSchedule = () => {
@@ -631,7 +667,7 @@ const ScheduleScreen: React.FC = () => {
     }
 
     return (
-        <View style={styles.container}>
+        <SafeAreaView style={styles.container}>
             <ScrollView
                 style={styles.scrollView}
                 refreshControl={
@@ -987,30 +1023,47 @@ const ScheduleScreen: React.FC = () => {
                                     <View style={styles.datetimeInputContainer}>
                                         <Text style={styles.inputLabel}>Scheduled Date & Time</Text>
 
-                                        <View style={styles.datetimeRow}>
-                                            <TouchableOpacity
-                                                style={styles.dateTimeSelectButton}
-                                                onPress={() => setShowDatePicker(true)}
-                                            >
-                                                <Ionicons name="calendar" size={16} color="#007AFF" />
-                                                <Text style={styles.dateTimeSelectButtonText}>
-                                                    {formatDate(selectedDate)}
-                                                </Text>
-                                            </TouchableOpacity>
+                                        <View style={styles.pickerRow}>
+                                            <View style={styles.pickerColumn}>
+                                                <Text style={styles.pickerLabel}>Date</Text>
+                                                <TouchableOpacity
+                                                    style={styles.pickerButton}
+                                                    onPress={openDatePicker}
+                                                >
+                                                    <Text style={styles.pickerButtonText}>
+                                                        {formatDate(selectedDate)}
+                                                    </Text>
+                                                </TouchableOpacity>
+                                            </View>
 
-                                            <TouchableOpacity
-                                                style={styles.dateTimeSelectButton}
-                                                onPress={() => setShowTimePicker(true)}
-                                            >
-                                                <Ionicons name="time" size={16} color="#007AFF" />
-                                                <Text style={styles.dateTimeSelectButtonText}>
-                                                    {formatTime(selectedTime)}
-                                                </Text>
-                                            </TouchableOpacity>
+                                            <View style={styles.pickerColumn}>
+                                                <Text style={styles.pickerLabel}>Time</Text>
+                                                <TouchableOpacity
+                                                    style={styles.pickerButton}
+                                                    onPress={openTimePicker}
+                                                >
+                                                    <Text style={styles.pickerButtonText}>
+                                                        {formatTime(selectedTime)}
+                                                    </Text>
+                                                </TouchableOpacity>
+                                            </View>
                                         </View>
 
-                                        <Text style={styles.selectedDateTime}>
-                                            Selected: {mediaFormData.scheduled_datetime || 'Not set'}
+                                        {mediaFormData.scheduled_datetime && (
+                                            <View style={styles.selectedDateTimeContainer}>
+                                                <Text style={styles.selectedDateTimeLabel}>Scheduled for:</Text>
+                                                <Text style={styles.selectedDateTimeText}>
+                                                    {new Date(mediaFormData.scheduled_datetime).toLocaleString()}
+                                                </Text>
+                                            </View>
+                                        )}
+                                    </View>
+                                )}
+
+                                {mediaFormData.schedule_type === 'range' && (
+                                    <View style={styles.rangeInfo}>
+                                        <Text style={styles.rangeInfoText}>
+                                            This file will be posted randomly within your account's scheduled time range.
                                         </Text>
                                     </View>
                                 )}
@@ -1042,25 +1095,84 @@ const ScheduleScreen: React.FC = () => {
                         </View>
                     </View>
                 </View>
+
+                {/* iOS Date Picker Modal */}
+                {Platform.OS === 'ios' && showDatePicker && (
+                    <Modal
+                        animationType="fade"
+                        transparent={true}
+                        visible={showDatePicker}
+                        onRequestClose={() => setShowDatePicker(false)}
+                    >
+                        <View style={styles.iosPickerBackdrop}>
+                            <View style={styles.iosPickerContainer}>
+                                <DateTimePicker
+                                    value={selectedDate}
+                                    mode="date"
+                                    display="spinner"
+                                    onChange={handleDateChange}
+                                    minimumDate={new Date()}
+                                    style={styles.dateTimePickerIos}
+                                    textColor="#000000"
+                                />
+                                <TouchableOpacity
+                                    style={styles.pickerDoneButton}
+                                    onPress={() => setShowDatePicker(false)}
+                                >
+                                    <Text style={styles.pickerDoneButtonText}>Done</Text>
+                                </TouchableOpacity>
+                            </View>
+                        </View>
+                    </Modal>
+                )}
+
+                {/* iOS Time Picker Modal */}
+                {Platform.OS === 'ios' && showTimePicker && (
+                    <Modal
+                        animationType="fade"
+                        transparent={true}
+                        visible={showTimePicker}
+                        onRequestClose={() => setShowTimePicker(false)}
+                    >
+                        <View style={styles.iosPickerBackdrop}>
+                            <View style={styles.iosPickerContainer}>
+                                <DateTimePicker
+                                    value={selectedTime}
+                                    mode="time"
+                                    display="spinner"
+                                    onChange={handleTimeChange}
+                                    style={styles.dateTimePickerIos}
+                                    textColor="#000000"
+                                />
+                                <TouchableOpacity
+                                    style={styles.pickerDoneButton}
+                                    onPress={() => setShowTimePicker(false)}
+                                >
+                                    <Text style={styles.pickerDoneButtonText}>Done</Text>
+                                </TouchableOpacity>
+                            </View>
+                        </View>
+                    </Modal>
+                )}
             </Modal>
             
-            {/* DATE/TIME PICKERS */}
-            {showDatePicker && (
+            {/* Android Date/Time Pickers */}
+            {Platform.OS === 'android' && showDatePicker && (
                 <DateTimePicker
                     value={selectedDate}
                     mode="date"
-                    display={Platform.OS === 'ios' ? 'spinner' : 'default'}
-                    onChange={onDateChange}
+                    display="default"
+                    onChange={handleDateChange}
                     minimumDate={new Date()}
                 />
             )}
 
-            {showTimePicker && (
+            {Platform.OS === 'android' && showTimePicker && (
                 <DateTimePicker
                     value={selectedTime}
                     mode="time"
-                    display={Platform.OS === 'ios' ? 'spinner' : 'default'}
-                    onChange={onTimeChange}
+                    display="default"
+                    onChange={handleTimeChange}
                 />
             )}
 
@@ -1096,7 +1208,7 @@ const ScheduleScreen: React.FC = () => {
                     </View>
                 </View>
             </Modal>
-        </View>
+        </SafeAreaView>
     );
 };
 
@@ -1527,33 +1639,68 @@ const styles = StyleSheet.create({
     datetimeInputContainer: {
         marginBottom: 20,
     },
-    datetimeRow: {
+    pickerRow: {
         flexDirection: 'row',
         gap: 10,
         marginBottom: 10,
     },
-    dateTimeSelectButton: {
+    pickerColumn: {
         flex: 1,
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'center',
-        gap: 8,
-        padding: 12,
-        backgroundColor: '#f8f8f8',
-        borderRadius: 8,
+    },
+    pickerLabel: {
+        fontSize: 14,
+        fontWeight: '600',
+        color: '#333',
+        marginBottom: 8,
+    },
+    pickerButton: {
         borderWidth: 1,
         borderColor: '#ddd',
+        borderRadius: 8,
+        paddingHorizontal: 12,
+        paddingVertical: 12,
+        backgroundColor: '#fff',
+        alignItems: 'center',
+        minHeight: 44,
+        justifyContent: 'center',
     },
-    dateTimeSelectButtonText: {
+    pickerButtonText: {
         fontSize: 14,
-        color: '#007AFF',
+        color: '#333',
         fontWeight: '500',
     },
-    selectedDateTime: {
+    selectedDateTimeContainer: {
+        backgroundColor: '#e8f4fd',
+        padding: 12,
+        borderRadius: 8,
+        marginTop: 10,
+        borderLeftWidth: 4,
+        borderLeftColor: '#007AFF',
+    },
+    selectedDateTimeLabel: {
         fontSize: 12,
+        color: '#007AFF',
+        fontWeight: '500',
+        marginBottom: 4,
+    },
+    selectedDateTimeText: {
+        fontSize: 14,
+        color: '#333',
+        fontWeight: '600',
+    },
+    rangeInfo: {
+        backgroundColor: '#f8f8f8',
+        padding: 15,
+        borderRadius: 8,
+        marginBottom: 20,
+        borderWidth: 1,
+        borderColor: '#e0e0e0',
+    },
+    rangeInfoText: {
+        fontSize: 14,
         color: '#666',
         textAlign: 'center',
-        fontStyle: 'italic',
+        lineHeight: 20,
     },
     inputContainer: {
         marginBottom: 16,
@@ -1684,6 +1831,45 @@ const styles = StyleSheet.create({
         fontSize: 16,
         fontWeight: '600',
     },
+    // iOS Picker Styles
+    iosPickerBackdrop: {
+        flex: 1,
+        backgroundColor: 'rgba(0, 0, 0, 0.5)',
+        justifyContent: 'flex-end',
+    },
+    iosPickerContainer: {
+        backgroundColor: '#fff',
+        width: '100%',
+        borderTopLeftRadius: 20,
+        borderTopRightRadius: 20,
+        paddingHorizontal: 20,
+        paddingTop: 20,
+        paddingBottom: Platform.OS === 'ios' ? 30 : 20,
+        alignItems: 'center',
+    },
+    dateTimePickerIos: {
+        height: 200,
+        width: '100%',
+        backgroundColor: '#fff',
+    },
+    pickerDoneButton: {
+        backgroundColor: '#007AFF',
+        padding: 12,
+        borderRadius: 8,
+        alignItems: 'center',
+        marginTop: 10,
+        width: '100%',
+    },
+    pickerDoneButtonText: {
+        color: '#fff',
+        fontSize: 16,
+        fontWeight: '600',
+    },
 });
 
 export default ScheduleScreen;
+
+
+
+
+

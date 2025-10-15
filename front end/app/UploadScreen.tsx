@@ -53,23 +53,21 @@ const UploadScreen: React.FC = () => {
   const [modalVisible, setModalVisible] = useState(false);
   const [uploadProgress, setUploadProgress] = useState<{ [key: string]: number }>({});
   const [chunkProgress, setChunkProgress] = useState<ChunkProgress>({});
-  
+
   const cancelUploadRef = useRef(false);
   const activeUploadsRef = useRef<Set<string>>(new Set());
-  
+
   // Schedule modal states
   const [scheduleModalVisible, setScheduleModalVisible] = useState(false);
   const [currentMediaForScheduling, setCurrentMediaForScheduling] = useState<MediaFile | null>(null);
   const [selectedScheduleType, setSelectedScheduleType] = useState<'range' | 'datetime'>('range');
   const [scheduledDateTime, setScheduledDateTime] = useState<string>('');
-  
-  // Date/Time Picker States (MUST BE RENDERED OUTSIDE MODALS)
+
+  // Date/Time Picker States - IMPROVED (further refined for iOS positioning)
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [showTimePicker, setShowTimePicker] = useState(false);
-  const [selectedDate, setSelectedDate] = useState<Date | null>(null);
-  const [selectedTime, setSelectedTime] = useState<Date | null>(null);
-  const tempSelectedDateRef = useRef<Date | null>(null); // To hold date while selecting time
-  const tempSelectedTimeRef = useRef<Date | null>(null); // To hold time while selecting date
+  const [selectedDate, setSelectedDate] = useState<Date>(new Date());
+  const [selectedTime, setSelectedTime] = useState<Date>(new Date());
 
   // Caption modal states
   const [captionModalVisible, setCaptionModalVisible] = useState(false);
@@ -119,74 +117,72 @@ const UploadScreen: React.FC = () => {
     }
   };
 
-  const updateScheduledDateTime = (date: Date | null, time: Date | null) => {
-    if (date && time) {
-      const scheduledDate = new Date(date);
-      scheduledDate.setHours(time.getHours());
-      scheduledDate.setMinutes(time.getMinutes());
-      scheduledDate.setSeconds(0);
-      scheduledDate.setMilliseconds(0);
-      
-      const year = scheduledDate.getFullYear();
-      const month = String(scheduledDate.getMonth() + 1).padStart(2, '0');
-      const day = String(scheduledDate.getDate()).padStart(2, '0');
-      const hours = String(scheduledDate.getHours()).padStart(2, '0');
-      const minutes = String(scheduledDate.getMinutes()).padStart(2, '0');
-      const seconds = String(scheduledDate.getSeconds()).padStart(2, '0');
-      
-      const formattedDateTime = `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
-      setScheduledDateTime(formattedDateTime);
-    }
-  };
-
-  // --- Date/Time Picker Handlers (Updated for Root Rendering) ---
+  // IMPROVED: Date/Time Picker Handlers
   const handleDateChange = (event: any, date?: Date) => {
-    setShowDatePicker(false);
+    // For Android, dismiss the picker after selection
+    if (Platform.OS === 'android') {
+      setShowDatePicker(false);
+    }
+
     if (date) {
       const newDate = date;
-      const timeToUse = tempSelectedTimeRef.current || new Date(); // Use existing time or default
-      newDate.setHours(timeToUse.getHours());
-      newDate.setMinutes(timeToUse.getMinutes());
-      
+      // Preserve time part from selectedTime for combining
+      const currentTime = selectedTime;
+      newDate.setHours(currentTime.getHours());
+      newDate.setMinutes(currentTime.getMinutes());
+      newDate.setSeconds(currentTime.getSeconds()); // Ensure seconds are also preserved
+
       setSelectedDate(newDate);
-      tempSelectedDateRef.current = newDate;
-      updateScheduledDateTime(newDate, timeToUse);
+      updateScheduledDateTime(newDate, currentTime);
     }
   };
 
   const handleTimeChange = (event: any, time?: Date) => {
-    setShowTimePicker(false);
+    // For Android, dismiss the picker after selection
+    if (Platform.OS === 'android') {
+      setShowTimePicker(false);
+    }
+
     if (time) {
       const newTime = time;
-      const dateToUse = tempSelectedDateRef.current || new Date(); // Use existing date or default
-      
-      const newDateTime = new Date(dateToUse);
+      // Preserve date part from selectedDate for combining
+      const currentDate = selectedDate;
+
+      const newDateTime = new Date(currentDate);
       newDateTime.setHours(newTime.getHours());
       newDateTime.setMinutes(newTime.getMinutes());
+      newDateTime.setSeconds(newTime.getSeconds()); // Ensure seconds are also preserved
 
       setSelectedTime(newTime);
-      tempSelectedTimeRef.current = newTime;
-      updateScheduledDateTime(dateToUse, newTime);
+      updateScheduledDateTime(currentDate, newTime);
     }
   };
 
+  const updateScheduledDateTime = (date: Date, time: Date) => {
+    const scheduledDate = new Date(date);
+    scheduledDate.setHours(time.getHours());
+    scheduledDate.setMinutes(time.getMinutes());
+    scheduledDate.setSeconds(time.getSeconds());
+    scheduledDate.setMilliseconds(0);
+
+    const year = scheduledDate.getFullYear();
+    const month = String(scheduledDate.getMonth() + 1).padStart(2, '0');
+    const day = String(scheduledDate.getDate()).padStart(2, '0');
+    const hours = String(scheduledDate.getHours()).padStart(2, '0');
+    const minutes = String(scheduledDate.getMinutes()).padStart(2, '0');
+    const seconds = String(scheduledDate.getSeconds()).padStart(2, '0');
+
+    const formattedDateTime = `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
+    setScheduledDateTime(formattedDateTime);
+  };
+
   const openDatePicker = () => {
-    // Initialize refs if null, using current date/time
-    const now = new Date();
-    if (!tempSelectedDateRef.current) tempSelectedDateRef.current = selectedDate || now;
-    if (!tempSelectedTimeRef.current) tempSelectedTimeRef.current = selectedTime || now;
     setShowDatePicker(true);
   }
 
   const openTimePicker = () => {
-    // Initialize refs if null, using current date/time
-    const now = new Date();
-    if (!tempSelectedDateRef.current) tempSelectedDateRef.current = selectedDate || now;
-    if (!tempSelectedTimeRef.current) tempSelectedTimeRef.current = selectedTime || now;
     setShowTimePicker(true);
   }
-  // --- End Date/Time Picker Handlers ---
-
 
   const pickMultipleMedia = async (mediaType: 'images' | 'videos' | 'all') => {
     try {
@@ -234,33 +230,27 @@ const UploadScreen: React.FC = () => {
     console.log('✅ Opening schedule modal for:', media.name);
     setCurrentMediaForScheduling(media);
     setSelectedScheduleType(media.scheduleType);
-    
-    // Set temp refs and state for date/time if available
+
+    // Set initial date/time if available, otherwise use current
     if (media.scheduledDatetime) {
       const date = new Date(media.scheduledDatetime);
       setSelectedDate(date);
       setSelectedTime(date);
-      tempSelectedDateRef.current = date;
-      tempSelectedTimeRef.current = date;
       setScheduledDateTime(media.scheduledDatetime);
     } else {
-      setSelectedDate(null);
-      setSelectedTime(null);
-      tempSelectedDateRef.current = new Date(); // Default to now
-      tempSelectedTimeRef.current = new Date(); // Default to now
-      setScheduledDateTime('');
+      const now = new Date();
+      setSelectedDate(now);
+      setSelectedTime(now);
+      updateScheduledDateTime(now, now);
     }
-    
+
     setScheduleModalVisible(true);
-    console.log('✅ Schedule modal state set to true');
   };
 
   const openCaptionModal = (media: MediaFile) => {
-    console.log('✅ Opening caption modal for:', media.name);
     setCurrentMediaForCaption(media);
     setCaptionText(media.caption || '');
     setCaptionModalVisible(true);
-    console.log('✅ Caption modal state set to true');
   };
 
   const saveScheduleSettings = () => {
@@ -275,20 +265,15 @@ const UploadScreen: React.FC = () => {
       prev.map(media =>
         media.id === currentMediaForScheduling.id
           ? {
-              ...media,
-              scheduleType: selectedScheduleType,
-              scheduledDatetime: selectedScheduleType === 'datetime' ? scheduledDateTime : undefined,
-            }
+            ...media,
+            scheduleType: selectedScheduleType,
+            scheduledDatetime: selectedScheduleType === 'datetime' ? scheduledDateTime : undefined,
+          }
           : media
       )
     );
 
     setScheduleModalVisible(false);
-    // Reset picker-related states
-    // Note: Do not reset temp refs here, keep them for next open
-    setSelectedDate(null); 
-    setSelectedTime(null);
-    setScheduledDateTime('');
     setCurrentMediaForScheduling(null);
   };
 
@@ -351,13 +336,13 @@ const UploadScreen: React.FC = () => {
   const handleCancelUpload = () => {
     cancelUploadRef.current = true;
     setUploading(false);
-    
-    setSelectedMedia(prev => 
-      prev.map(media => 
+
+    setSelectedMedia(prev =>
+      prev.map(media =>
         media.status === 'uploading' ? { ...media, status: 'pending' } : media
       )
     );
-    
+
     setModalVisible(false);
     activeUploadsRef.current.clear();
   };
@@ -392,7 +377,7 @@ const UploadScreen: React.FC = () => {
 
     const concurrencyLimit = 2;
     const batches = [];
-    
+
     for (let i = 0; i < mediaToUpload.length; i += concurrencyLimit) {
       batches.push(mediaToUpload.slice(i, i + concurrencyLimit));
     }
@@ -401,7 +386,7 @@ const UploadScreen: React.FC = () => {
       for (const batch of batches) {
         checkCancelled();
 
-        const batchPromises = batch.map(media => 
+        const batchPromises = batch.map(media =>
           uploadMediaToAccounts(media, selectedAccounts)
             .then(result => {
               if (result.success) successfulUploads++;
@@ -460,7 +445,7 @@ const UploadScreen: React.FC = () => {
         checkCancelled();
         await new Promise(resolve => setTimeout(resolve, 1000));
       }
-      
+
       setSelectedMedia(prev =>
         prev.map(m => m.id === media.id ? { ...m, status: 'completed' } : m)
       );
@@ -472,7 +457,7 @@ const UploadScreen: React.FC = () => {
         );
         return { success: false };
       }
-      
+
       console.error(`Upload failed for "${media.name}":`, error);
       setSelectedMedia(prev =>
         prev.map(m => m.id === media.id ? { ...m, status: 'failed' } : m)
@@ -489,7 +474,7 @@ const UploadScreen: React.FC = () => {
       checkCancelled();
 
       const uploadKey = `${media.id}-${accountId}`;
-      
+
       if (uploadProgress[uploadKey] === 100) {
         return;
       }
@@ -499,12 +484,12 @@ const UploadScreen: React.FC = () => {
       } else {
         await uploadSingleFile(media, accountId);
       }
-      
+
       setUploadProgress(prev => ({
         ...prev,
         [uploadKey]: 100
       }));
-      
+
     } catch (error: any) {
       checkCancelled();
 
@@ -537,12 +522,12 @@ const UploadScreen: React.FC = () => {
     formData.append('account_id', accountId);
     formData.append('platform', platform);
     formData.append('user_id', user.Id.toString());
-    
+
     formData.append('schedule_type', media.scheduleType);
     if (media.scheduleType === 'datetime' && media.scheduledDatetime) {
       formData.append('scheduled_datetime', media.scheduledDatetime);
     }
-    
+
     if (media.caption) {
       formData.append('caption', media.caption);
     }
@@ -571,7 +556,7 @@ const UploadScreen: React.FC = () => {
 
       const start = chunkIndex * CHUNK_SIZE;
       const end = Math.min(start + CHUNK_SIZE, media.size);
-      
+
       const chunkData = await FileSystem.readAsStringAsync(media.uri, {
         encoding: FileSystem.EncodingType.Base64,
         position: start,
@@ -591,19 +576,19 @@ const UploadScreen: React.FC = () => {
       chunkFormData.append('total_chunks', totalChunks.toString());
       chunkFormData.append('upload_id', uploadId);
       chunkFormData.append('original_name', media.name);
-      
+
       chunkFormData.append('schedule_type', media.scheduleType);
       if (media.scheduleType === 'datetime' && media.scheduledDatetime) {
         chunkFormData.append('scheduled_datetime', media.scheduledDatetime);
       }
-      
+
       if (chunkIndex === 0 && media.caption) {
         chunkFormData.append('caption', media.caption);
       }
 
       try {
         await ApiService.uploadMediaChunk(chunkFormData);
-        
+
         setChunkProgress(prev => ({
           ...prev,
           [media.id]: { uploaded: chunkIndex + 1, total: totalChunks }
@@ -629,12 +614,12 @@ const UploadScreen: React.FC = () => {
     finalizeFormData.append('user_id', user.Id.toString());
     finalizeFormData.append('original_name', media.name);
     finalizeFormData.append('total_chunks', totalChunks.toString());
-    
+
     finalizeFormData.append('schedule_type', media.scheduleType);
     if (media.scheduleType === 'datetime' && media.scheduledDatetime) {
       finalizeFormData.append('scheduled_datetime', media.scheduledDatetime);
     }
-    
+
     if (media.caption) {
       finalizeFormData.append('caption', media.caption);
     }
@@ -673,22 +658,22 @@ const UploadScreen: React.FC = () => {
 
   const MediaItem = ({ item }: { item: MediaFile }) => {
     const currentChunkProgress = chunkProgress[item.id];
-    
+
     const getStatusDisplay = () => {
       switch (item.status) {
-        case 'completed': 
+        case 'completed':
           return { text: 'Completed', color: '#34C759', icon: '✓' };
-        case 'uploading': 
+        case 'uploading':
           return { text: 'Uploading', color: '#007AFF', icon: '↻' };
-        case 'failed': 
+        case 'failed':
           return { text: 'Failed', color: '#FF3B30', icon: '✗' };
-        default: 
+        default:
           return { text: 'Pending', color: '#8E8E93', icon: '…' };
       }
     };
 
     const status = getStatusDisplay();
-    
+
     const renderScheduleText = () => {
       if (item.scheduleType === 'datetime' && item.scheduledDatetime) {
         return `📅 ${new Date(item.scheduledDatetime).toLocaleString()}`;
@@ -712,7 +697,7 @@ const UploadScreen: React.FC = () => {
         item.selected && styles.mediaItemSelected,
       ]}>
         {/* Checkbox */}
-        <TouchableOpacity 
+        <TouchableOpacity
           style={styles.checkboxContainer}
           onPress={() => toggleMediaSelection(item.id)}
         >
@@ -744,12 +729,12 @@ const UploadScreen: React.FC = () => {
           <Text style={styles.mediaName} numberOfLines={1}>
             {item.name || 'Unknown File'}
           </Text>
-          
+
           <Text style={styles.fileSize}>
             {formatFileSize(item.size)}
           </Text>
-          
-          <TouchableOpacity 
+
+          <TouchableOpacity
             style={styles.scheduleButton}
             onPress={() => openScheduleModal(item)}
             hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
@@ -758,8 +743,8 @@ const UploadScreen: React.FC = () => {
               {renderScheduleText()}
             </Text>
           </TouchableOpacity>
-          
-          <TouchableOpacity 
+
+          <TouchableOpacity
             style={styles.captionButton}
             onPress={() => openCaptionModal(item)}
             hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
@@ -768,7 +753,7 @@ const UploadScreen: React.FC = () => {
               {renderCaptionPreview()}
             </Text>
           </TouchableOpacity>
-          
+
           <View style={styles.statusContainer}>
             <View style={styles.statusWithIcon}>
               <Text style={styles.statusIcon}>
@@ -778,27 +763,27 @@ const UploadScreen: React.FC = () => {
                 {status.text}
               </Text>
             </View>
-            
+
             {item.status === 'uploading' && uploadProgress[item.id] !== undefined && (
               <Text style={styles.progressText}>
                 {Math.round(uploadProgress[item.id])}%
               </Text>
             )}
           </View>
-          
+
           {currentChunkProgress && (
             <Text style={styles.chunkProgressText}>
               Chunk: {currentChunkProgress.uploaded}/{currentChunkProgress.total}
             </Text>
           )}
-          
+
           {item.status === 'uploading' && (
             <View style={styles.progressBar}>
-              <View 
+              <View
                 style={[
-                  styles.progressFill, 
+                  styles.progressFill,
                   { width: `${uploadProgress[item.id] || 0}%` }
-                ]} 
+                ]}
               />
             </View>
           )}
@@ -951,7 +936,7 @@ const UploadScreen: React.FC = () => {
           </View>
         )}
       </View>
-      
+
       {/* Main Media Management Modal */}
       <Modal
         animationType="slide"
@@ -1061,11 +1046,8 @@ const UploadScreen: React.FC = () => {
                   )}
                 </TouchableOpacity>
               </View>
-              
-              
-              {/* === FIX APPLIED: NESTED SECONDARY MODALS START HERE === */}
-              
-              {/* Schedule Settings Modal (NESTED) */}
+
+              {/* Schedule Settings Modal - FIXED VERSION */}
               <Modal
                 animationType="slide"
                 transparent={true}
@@ -1080,7 +1062,7 @@ const UploadScreen: React.FC = () => {
                       {currentMediaForScheduling && (
                         <Text style={styles.scheduleMediaName}>{currentMediaForScheduling.name}</Text>
                       )}
-                      
+
                       <View style={styles.scheduleTypeContainer}>
                         <Text style={styles.scheduleTypeLabel}>Schedule Type:</Text>
                         <View style={styles.scheduleTypeButtons}>
@@ -1121,36 +1103,35 @@ const UploadScreen: React.FC = () => {
                       {selectedScheduleType === 'datetime' && (
                         <View style={styles.datetimeContainer}>
                           <Text style={styles.datetimeLabel}>Select Date & Time:</Text>
-                          
-                          <View style={styles.pickerContainer}>
-                            <Text style={styles.pickerLabel}>Date:</Text>
-                            <TouchableOpacity
-                              style={styles.pickerButton}
-                              onPress={openDatePicker} // Use new handler
-                            >
-                              <Text style={styles.pickerButtonText}>
-                                {selectedDate ? selectedDate.toDateString() : 'Select Date'}
-                              </Text>
-                            </TouchableOpacity>
-                          </View>
 
-                          <View style={styles.pickerContainer}>
-                            <Text style={styles.pickerLabel}>Time:</Text>
-                            <TouchableOpacity
-                              style={styles.pickerButton}
-                              onPress={openTimePicker} // Use new handler
-                            >
-                              <Text style={styles.pickerButtonText}>
-                                {selectedTime ? 
-                                  selectedTime.toLocaleTimeString([], { 
-                                    hour: '2-digit', 
+                          <View style={styles.pickerRow}>
+                            <View style={styles.pickerColumn}>
+                              <Text style={styles.pickerLabel}>Date</Text>
+                              <TouchableOpacity
+                                style={styles.pickerButton}
+                                onPress={openDatePicker}
+                              >
+                                <Text style={styles.pickerButtonText}>
+                                  {selectedDate.toLocaleDateString()}
+                                </Text>
+                              </TouchableOpacity>
+                            </View>
+
+                            <View style={styles.pickerColumn}>
+                              <Text style={styles.pickerLabel}>Time</Text>
+                              <TouchableOpacity
+                                style={styles.pickerButton}
+                                onPress={openTimePicker}
+                              >
+                                <Text style={styles.pickerButtonText}>
+                                  {selectedTime.toLocaleTimeString([], {
+                                    hour: '2-digit',
                                     minute: '2-digit',
-                                    hour12: true 
-                                  }) 
-                                  : 'Select Time'
-                                }
-                              </Text>
-                            </TouchableOpacity>
+                                    hour12: true
+                                  })}
+                                </Text>
+                              </TouchableOpacity>
+                            </View>
                           </View>
 
                           {scheduledDateTime && (
@@ -1161,7 +1142,6 @@ const UploadScreen: React.FC = () => {
                               </Text>
                             </View>
                           )}
-                          
                         </View>
                       )}
 
@@ -1194,9 +1174,68 @@ const UploadScreen: React.FC = () => {
                     </View>
                   </View>
                 </View>
+
+                {/* iOS Date Picker Modal - NEW */}
+                {Platform.OS === 'ios' && showDatePicker && (
+                  <Modal
+                    animationType="fade"
+                    transparent={true}
+                    visible={showDatePicker}
+                    onRequestClose={() => setShowDatePicker(false)}
+                  >
+                    <View style={styles.iosPickerBackdrop}>
+                      <View style={styles.iosPickerContainer}>
+                        <DateTimePicker
+                          value={selectedDate}
+                          mode="date"
+                          display="spinner"
+                          onChange={handleDateChange}
+                          minimumDate={new Date()}
+                          style={styles.dateTimePickerIos}
+                          textColor="#000000"
+                        />
+                        <TouchableOpacity
+                          style={styles.pickerDoneButton}
+                          onPress={() => setShowDatePicker(false)}
+                        >
+                          <Text style={styles.pickerDoneButtonText}>Done</Text>
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+                  </Modal>
+                )}
+
+                {/* iOS Time Picker Modal - NEW */}
+                {Platform.OS === 'ios' && showTimePicker && (
+                  <Modal
+                    animationType="fade"
+                    transparent={true}
+                    visible={showTimePicker}
+                    onRequestClose={() => setShowTimePicker(false)}
+                  >
+                    <View style={styles.iosPickerBackdrop}>
+                      <View style={styles.iosPickerContainer}>
+                        <DateTimePicker
+                          value={selectedTime}
+                          mode="time"
+                          display="spinner"
+                          onChange={handleTimeChange}
+                          style={styles.dateTimePickerIos}
+                          textColor="#000000"
+                        />
+                        <TouchableOpacity
+                          style={styles.pickerDoneButton}
+                          onPress={() => setShowTimePicker(false)}
+                        >
+                          <Text style={styles.pickerDoneButtonText}>Done</Text>
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+                  </Modal>
+                )}
               </Modal>
 
-              {/* Caption Modal (NESTED) */}
+              {/* Caption Modal */}
               <Modal
                 animationType="slide"
                 transparent={true}
@@ -1211,7 +1250,7 @@ const UploadScreen: React.FC = () => {
                       {currentMediaForCaption && (
                         <Text style={styles.captionMediaName}>{currentMediaForCaption.name}</Text>
                       )}
-                      
+
                       <View style={styles.captionInputContainer}>
                         <Text style={styles.captionLabel}>Caption:</Text>
                         <TextInput
@@ -1252,707 +1291,736 @@ const UploadScreen: React.FC = () => {
                   </View>
                 </View>
               </Modal>
-
             </View>
           </View>
         </View>
       </Modal>
-
-      {/* ========================================
-        FIX: DATE/TIME PICKERS MOVED TO ROOT LEVEL
-        ========================================
-      */}
-      {showDatePicker && (
-        <DateTimePicker
-          value={selectedDate || new Date()}
-          mode="date"
-          display={Platform.OS === 'ios' ? 'spinner' : 'default'}
-          onChange={handleDateChange}
-          minimumDate={new Date()}
-        />
-      )}
-      
-      {showTimePicker && (
-        <DateTimePicker
-          value={selectedTime || new Date()}
-          mode="time"
-          display={Platform.OS === 'ios' ? 'spinner' : 'default'}
-          onChange={handleTimeChange}
-        />
-      )}
     </SafeAreaView>
   );
 };
 
-// ... (Styles object is not changed)
 const styles = StyleSheet.create({
-    container: {
-      flex: 1,
-      backgroundColor: '#f5f5f5',
-    },
-    content: {
-      padding: 20,
-    },
-    title: {
-      fontSize: 28,
-      fontWeight: 'bold',
-      color: '#333',
-      marginBottom: 20,
-      textAlign: 'center',
-    },
-    section: {
-      marginBottom: 20,
-    },
-    sectionTitle: {
-      fontSize: 16,
-      fontWeight: '600',
-      color: '#333',
-      marginBottom: 10,
-    },
-    platformContainer: {
-      flexDirection: 'row',
-      flexWrap: 'wrap',
-      gap: 10,
-    },
-    platformButton: {
-      paddingHorizontal: 16,
-      paddingVertical: 8,
-      backgroundColor: '#fff',
-      borderRadius: 20,
-      borderWidth: 1,
-      borderColor: '#ddd',
-    },
-    platformButtonActive: {
-      backgroundColor: '#007AFF',
-      borderColor: '#007AFF',
-    },
-    platformButtonText: {
-      fontSize: 14,
-      color: '#666',
-      fontWeight: '500',
-    },
-    platformButtonTextActive: {
-      color: '#fff',
-    },
-    emptyState: {
-      backgroundColor: '#fff',
-      padding: 20,
-      borderRadius: 10,
-      alignItems: 'center',
-    },
-    emptyText: {
-      fontSize: 14,
-      color: '#666',
-      marginBottom: 4,
-    },
-    emptySubtext: {
-      fontSize: 12,
-      color: '#999',
-      textAlign: 'center',
-    },
-    accountListContainer: {
-      backgroundColor: '#fff',
-      borderRadius: 10,
-      maxHeight: 200,
-    },
-    accountItem: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      padding: 15,
-      borderBottomWidth: 1,
-      borderBottomColor: '#f0f0f0',
-    },
-    accountItemSelected: {
-      backgroundColor: '#f8f8f8',
-    },
-    accountItemText: {
-      fontSize: 16,
-      color: '#333',
-      marginLeft: 10,
-    },
-    checkbox: {
-      width: 20,
-      height: 20,
-      borderRadius: 4,
-      borderWidth: 2,
-      borderColor: '#ccc',
-      justifyContent: 'center',
-      alignItems: 'center',
-    },
-    checkboxSelected: {
-      backgroundColor: '#007AFF',
-      borderColor: '#007AFF',
-    },
-    checkboxTick: {
-      justifyContent: 'center',
-      alignItems: 'center',
-    },
-    checkboxTickText: {
-      color: '#fff',
-      fontSize: 12,
-      fontWeight: 'bold',
-    },
-    checkboxContainer: {
-      marginRight: 10,
-    },
-    uploadSection: {
-      marginBottom: 20,
-    },
-    statsContainer: {
-      flexDirection: 'row',
-      justifyContent: 'space-around',
-      backgroundColor: '#fff',
-      padding: 15,
-      borderRadius: 10,
-      marginBottom: 15,
-    },
-    statItem: {
-      alignItems: 'center',
-    },
-    statNumber: {
-      fontSize: 20,
-      fontWeight: 'bold',
-      color: '#007AFF',
-    },
-    statLabel: {
-      fontSize: 12,
-      color: '#666',
-      marginTop: 4,
-    },
-    uploadButton: {
-      backgroundColor: '#007AFF',
-      padding: 15,
-      borderRadius: 10,
-      alignItems: 'center',
-    },
-    uploadButtonDisabled: {
-      backgroundColor: '#ccc',
-    },
-    uploadButtonText: {
-      color: '#fff',
-      fontSize: 16,
-      fontWeight: '600',
-    },
-    accountInfo: {
-      backgroundColor: '#e8f4fd',
-      padding: 15,
-      borderRadius: 10,
-      borderLeftWidth: 4,
-      borderLeftColor: '#007AFF',
-    },
-    accountInfoText: {
-      fontSize: 14,
-      color: '#007AFF',
-      fontWeight: '500',
-    },
-    mediaCountText: {
-      fontSize: 13,
-      color: '#007AFF',
-      marginTop: 5,
-      fontWeight: '400',
-    },
-    helpContainer: {
-      backgroundColor: '#fff3cd',
-      padding: 15,
-      borderRadius: 10,
-      borderLeftWidth: 4,
-      borderLeftColor: '#ffc107',
-      marginTop: 10,
-    },
-    helpText: {
-      fontSize: 14,
-      color: '#856404',
-      fontWeight: '500',
-    },
-    modalBackdrop: {
-      flex: 1,
-      backgroundColor: 'rgba(0, 0, 0, 0.5)',
-      justifyContent: 'center',
-      alignItems: 'center',
-      zIndex: 1000,
-    },
-    modalContainer: {
-      width: '100%',
-      height: '100%',
-      justifyContent: 'center',
-      alignItems: 'center',
-      padding: Platform.OS === 'ios' ? 20 : 0,
-    },
-    modalContent: {
-      backgroundColor: '#fff',
-      borderRadius: 15,
-      padding: 20,
-      width: Platform.OS === 'ios' ? '90%' : '100%',
-      maxHeight: Platform.OS === 'ios' ? '80%' : '100%',
-      zIndex: 1001,
-      elevation: Platform.OS === 'android' ? 5 : undefined,
-    },
-    modalHeader: {
-      marginBottom: 15,
-    },
-    modalTitle: {
-      fontSize: 20,
-      fontWeight: 'bold',
-      color: '#333',
-      textAlign: 'center',
-    },
-    selectedAccount: {
-      fontSize: 14,
-      color: '#666',
-      textAlign: 'center',
-      marginTop: 5,
-    },
-    selectionInfo: {
-      fontSize: 12,
-      color: '#007AFF',
-      textAlign: 'center',
-      marginTop: 2,
-      fontWeight: '500',
-    },
-    selectionControls: {
-      flexDirection: 'row',
-      justifyContent: 'space-between',
-      marginBottom: 15,
-      gap: 5,
-    },
-    selectionButton: {
-      flex: 1,
-      padding: 8,
-      backgroundColor: '#f8f8f8',
-      borderRadius: 6,
-      alignItems: 'center',
-    },
-    selectionButtonText: {
-      fontSize: 12,
-      color: '#333',
-      fontWeight: '500',
-    },
-    clearAllText: {
-      color: '#FF3B30',
-    },
-    mediaListContainer: {
-      flex: 1,
-      marginBottom: 20,
-    },
-    mediaList: {
-      maxHeight: 300,
-    },
-    mediaItem: {
-      flexDirection: 'row',
-      backgroundColor: '#f8f8f8',
-      padding: 12,
-      borderRadius: 8,
-      marginBottom: 8,
-      alignItems: 'center',
-    },
-    mediaItemSelected: {
-      backgroundColor: '#e8f4fd',
-      borderColor: '#007AFF',
-      borderWidth: 1,
-    },
-    mediaPreview: {
-      marginRight: 12,
-    },
-    mediaThumbnail: {
-      width: 50,
-      height: 50,
-      borderRadius: 6,
-    },
-    videoThumbnail: {
-      backgroundColor: '#e0e0e0',
-      justifyContent: 'center',
-      alignItems: 'center',
-    },
-    videoIcon: {
-      fontSize: 16,
-      color: '#666',
-      fontWeight: 'bold',
-    },
-    mediaInfo: {
-      flex: 1,
-    },
-    mediaName: {
-      fontSize: 14,
-      color: '#333',
-      fontWeight: '500',
-      marginBottom: 2,
-    },
-    fileSize: {
-      fontSize: 12,
-      color: '#666',
-      marginBottom: 6,
-    },
-    scheduleButton: {
-      backgroundColor: '#f0f0f0',
-      paddingHorizontal: 8,
-      paddingVertical: 6,
-      borderRadius: 4,
-      marginBottom: 4,
-      alignSelf: 'flex-start',
-    },
-    scheduleButtonText: {
-      fontSize: 11,
-      color: '#666',
-      fontWeight: '500',
-    },
-    captionButton: {
-      backgroundColor: '#f0f8ff',
-      paddingHorizontal: 8,
-      paddingVertical: 6,
-      borderRadius: 4,
-      marginBottom: 6,
-      alignSelf: 'flex-start',
-      borderWidth: 1,
-      borderColor: '#007AFF',
-    },
-    captionButtonText: {
-      fontSize: 11,
-      color: '#007AFF',
-      fontWeight: '500',
-    },
-    statusContainer: {
-      flexDirection: 'row',
-      justifyContent: 'space-between',
-      alignItems: 'center',
-    },
-    statusWithIcon: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 4,
-    },
-    statusIcon: {
-      fontSize: 12,
-    },
-    statusText: {
-      fontSize: 12,
-      fontWeight: '500',
-    },
-    progressText: {
-      fontSize: 12,
-      color: '#007AFF',
-      fontWeight: '500',
-    },
-    chunkProgressText: {
-      fontSize: 11,
-      color: '#666',
-      marginTop: 2,
-    },
-    progressBar: {
-      height: 3,
-      backgroundColor: '#e0e0e0',
-      borderRadius: 2,
-      marginTop: 4,
-      overflow: 'hidden',
-    },
-    progressFill: {
-      height: '100%',
-      backgroundColor: '#007AFF',
-      borderRadius: 2,
-    },
-    removeMediaButton: {
-      padding: 4,
-    },
-    removeMediaText: {
-      color: '#FF3B30',
-      fontSize: 18,
-      fontWeight: 'bold',
-    },
-    noMediaContainer: {
-      padding: 40,
-      alignItems: 'center',
-      marginBottom: 20,
-    },
-    noMediaText: {
-      fontSize: 16,
-      color: '#666',
-      marginBottom: 8,
-    },
-    noMediaSubtext: {
-      fontSize: 14,
-      color: '#999',
-      textAlign: 'center',
-    },
-    mediaButtons: {
-      gap: 10,
-      marginBottom: 20,
-    },
-    mediaButton: {
-      backgroundColor: '#f8f8f8',
-      padding: 15,
-      borderRadius: 10,
-      alignItems: 'center',
-      borderWidth: 1,
-      borderColor: '#ddd',
-    },
-    mediaButtonText: {
-      fontSize: 16,
-      color: '#333',
-      fontWeight: '500',
-    },
-    actionButtons: {
-      flexDirection: 'row',
-      gap: 10,
-    },
-    cancelButton: {
-      flex: 1,
-      padding: 15,
-      borderRadius: 10,
-      alignItems: 'center',
-      borderWidth: 1,
-      borderColor: '#ddd',
-    },
-    cancelButtonText: {
-      fontSize: 16,
-      color: '#666',
-      fontWeight: '500',
-    },
-    uploadModalButton: {
-      flex: 2,
-      backgroundColor: '#34C759',
-      padding: 15,
-      borderRadius: 10,
-      alignItems: 'center',
-    },
-    uploadModalButtonDisabled: {
-      backgroundColor: '#ccc',
-    },
-    uploadModalButtonText: {
-      color: '#fff',
-      fontSize: 16,
-      fontWeight: '600',
-    },
-    uploadingContainer: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 8,
-    },
-    uploadingText: {
-      color: '#fff',
-      fontSize: 14,
-      fontWeight: '500',
-    },
-    scheduleModalContent: {
-      backgroundColor: '#fff',
-      borderRadius: 15,
-      padding: 20,
-      width: Platform.OS === 'ios' ? '90%' : '100%',
-      maxHeight: Platform.OS === 'ios' ? '80%' : '100%',
-      zIndex: 1001,
-      elevation: Platform.OS === 'android' ? 5 : undefined,
-    },
-    scheduleModalTitle: {
-      fontSize: 20,
-      fontWeight: 'bold',
-      color: '#333',
-      textAlign: 'center',
-      marginBottom: 10,
-    },
-    scheduleMediaName: {
-      fontSize: 14,
-      color: '#666',
-      textAlign: 'center',
-      marginBottom: 20,
-      fontStyle: 'italic',
-    },
-    scheduleTypeContainer: {
-      marginBottom: 20,
-    },
-    scheduleTypeLabel: {
-      fontSize: 16,
-      fontWeight: '600',
-      color: '#333',
-      marginBottom: 10,
-    },
-    scheduleTypeButtons: {
-      flexDirection: 'row',
-      gap: 10,
-    },
-    scheduleTypeButton: {
-      flex: 1,
-      padding: 12,
-      backgroundColor: '#f8f8f8',
-      borderRadius: 8,
-      alignItems: 'center',
-      borderWidth: 1,
-      borderColor: '#ddd',
-    },
-    scheduleTypeButtonActive: {
-      backgroundColor: '#007AFF',
-      borderColor: '#007AFF',
-    },
-    scheduleTypeButtonText: {
-      fontSize: 14,
-      color: '#666',
-      fontWeight: '500',
-    },
-    scheduleTypeButtonTextActive: {
-      color: '#fff',
-    },
-    datetimeContainer: {
-      marginBottom: 20,
-    },
-    datetimeLabel: {
-      fontSize: 14,
-      fontWeight: '600',
-      color: '#333',
-      marginBottom: 8,
-    },
-    pickerContainer: {
-      marginBottom: 15,
-    },
-    pickerLabel: {
-      fontSize: 14,
-      fontWeight: '600',
-      color: '#333',
-      marginBottom: 8,
-    },
-    pickerButton: {
-      borderWidth: 1,
-      borderColor: '#ddd',
-      borderRadius: 8,
-      paddingHorizontal: 12,
-      paddingVertical: 12,
-      backgroundColor: '#fff',
-    },
-    pickerButtonText: {
-      fontSize: 14,
-      color: '#333',
-    },
-    selectedDateTimeContainer: {
-      backgroundColor: '#e8f4fd',
-      padding: 12,
-      borderRadius: 8,
-      marginTop: 10,
-    },
-    selectedDateTimeLabel: {
-      fontSize: 12,
-      color: '#007AFF',
-      fontWeight: '500',
-      marginBottom: 4,
-    },
-    selectedDateTimeText: {
-      fontSize: 14,
-      color: '#333',
-      fontWeight: '600',
-    },
-    rangeInfo: {
-      backgroundColor: '#f8f8f8',
-      padding: 12,
-      borderRadius: 8,
-      marginBottom: 20,
-    },
-    rangeInfoText: {
-      fontSize: 14,
-      color: '#666',
-      textAlign: 'center',
-    },
-    scheduleModalActions: {
-      flexDirection: 'row',
-      gap: 10,
-    },
-    scheduleCancelButton: {
-      flex: 1,
-      padding: 15,
-      borderRadius: 8,
-      alignItems: 'center',
-      borderWidth: 1,
-      borderColor: '#ddd',
-    },
-    scheduleCancelButtonText: {
-      fontSize: 16,
-      color: '#666',
-      fontWeight: '500',
-    },
-    scheduleSaveButton: {
-      flex: 1,
-      backgroundColor: '#007AFF',
-      padding: 15,
-      borderRadius: 8,
-      alignItems: 'center',
-    },
-    scheduleSaveButtonText: {
-      color: '#fff',
-      fontSize: 16,
-      fontWeight: '600',
-    },
-    captionModalContent: {
-      backgroundColor: '#fff',
-      borderRadius: 15,
-      padding: 20,
-      width: Platform.OS === 'ios' ? '90%' : '100%',
-      maxHeight: Platform.OS === 'ios' ? '60%' : '100%',
-      zIndex: 1001,
-      elevation: Platform.OS === 'android' ? 5 : undefined,
-    },
-    captionModalTitle: {
-      fontSize: 20,
-      fontWeight: 'bold',
-      color: '#333',
-      textAlign: 'center',
-      marginBottom: 10,
-    },
-    captionMediaName: {
-      fontSize: 14,
-      color: '#666',
-      textAlign: 'center',
-      marginBottom: 20,
-      fontStyle: 'italic',
-    },
-    captionInputContainer: {
-      marginBottom: 20,
-    },
-    captionLabel: {
-      fontSize: 16,
-      fontWeight: '600',
-      color: '#333',
-      marginBottom: 8,
-    },
-    captionInput: {
-      borderWidth: 1,
-      borderColor: '#ddd',
-      borderRadius: 8,
-      paddingHorizontal: 12,
-      paddingVertical: 12,
-      fontSize: 14,
-      backgroundColor: '#fff',
-      minHeight: 100,
-      textAlignVertical: 'top',
-    },
-    captionCounter: {
-      fontSize: 12,
-      color: '#666',
-      textAlign: 'right',
-      marginTop: 4,
-    },
-    captionModalActions: {
-      flexDirection: 'row',
-      gap: 10,
-    },
-    captionCancelButton: {
-      flex: 1,
-      padding: 15,
-      borderRadius: 8,
-      alignItems: 'center',
-      borderWidth: 1,
-      borderColor: '#ddd',
-    },
-    captionCancelButtonText: {
-      fontSize: 16,
-      color: '#666',
-      fontWeight: '500',
-    },
-    captionSaveButton: {
-      flex: 1,
-      backgroundColor: '#007AFF',
-      padding: 15,
-      borderRadius: 8,
-      alignItems: 'center',
-    },
-    captionSaveButtonText: {
-      color: '#fff',
-      fontSize: 16,
-      fontWeight: '600',
-    },
-  });
+  container: {
+    flex: 1,
+    backgroundColor: '#f5f5f5',
+  },
+  content: {
+    padding: 20,
+  },
+  title: {
+    fontSize: 28,
+    fontWeight: 'bold',
+    color: '#333',
+    marginBottom: 20,
+    textAlign: 'center',
+  },
+  section: {
+    marginBottom: 20,
+  },
+  sectionTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#333',
+    marginBottom: 10,
+  },
+  platformContainer: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+  },
+  platformButton: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    backgroundColor: '#fff',
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: '#ddd',
+  },
+  platformButtonActive: {
+    backgroundColor: '#007AFF',
+    borderColor: '#007AFF',
+  },
+  platformButtonText: {
+    fontSize: 14,
+    color: '#666',
+    fontWeight: '500',
+  },
+  platformButtonTextActive: {
+    color: '#fff',
+  },
+  emptyState: {
+    backgroundColor: '#fff',
+    padding: 20,
+    borderRadius: 10,
+    alignItems: 'center',
+  },
+  emptyText: {
+    fontSize: 14,
+    color: '#666',
+    marginBottom: 4,
+  },
+  emptySubtext: {
+    fontSize: 12,
+    color: '#999',
+    textAlign: 'center',
+  },
+  accountListContainer: {
+    backgroundColor: '#fff',
+    borderRadius: 10,
+    maxHeight: 200,
+  },
+  accountItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 15,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f0f0f0',
+  },
+  accountItemSelected: {
+    backgroundColor: '#f8f8f8',
+  },
+  accountItemText: {
+    fontSize: 16,
+    color: '#333',
+    marginLeft: 10,
+  },
+  checkbox: {
+    width: 20,
+    height: 20,
+    borderRadius: 4,
+    borderWidth: 2,
+    borderColor: '#ccc',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  checkboxSelected: {
+    backgroundColor: '#007AFF',
+    borderColor: '#007AFF',
+  },
+  checkboxTick: {
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  checkboxTickText: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: 'bold',
+  },
+  checkboxContainer: {
+    marginRight: 10,
+  },
+  uploadSection: {
+    marginBottom: 20,
+  },
+  statsContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    backgroundColor: '#fff',
+    padding: 15,
+    borderRadius: 10,
+    marginBottom: 15,
+  },
+  statItem: {
+    alignItems: 'center',
+  },
+  statNumber: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#007AFF',
+  },
+  statLabel: {
+    fontSize: 12,
+    color: '#666',
+    marginTop: 4,
+  },
+  uploadButton: {
+    backgroundColor: '#007AFF',
+    padding: 15,
+    borderRadius: 10,
+    alignItems: 'center',
+  },
+  uploadButtonDisabled: {
+    backgroundColor: '#ccc',
+  },
+  uploadButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  accountInfo: {
+    backgroundColor: '#e8f4fd',
+    padding: 15,
+    borderRadius: 10,
+    borderLeftWidth: 4,
+    borderLeftColor: '#007AFF',
+  },
+  accountInfoText: {
+    fontSize: 14,
+    color: '#007AFF',
+    fontWeight: '500',
+  },
+  mediaCountText: {
+    fontSize: 13,
+    color: '#007AFF',
+    marginTop: 5,
+    fontWeight: '400',
+  },
+  helpContainer: {
+    backgroundColor: '#fff3cd',
+    padding: 15,
+    borderRadius: 10,
+    borderLeftWidth: 4,
+    borderLeftColor: '#ffc107',
+    marginTop: 10,
+  },
+  helpText: {
+    fontSize: 14,
+    color: '#856404',
+    fontWeight: '500',
+  },
+  modalBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  modalContainer: {
+    width: '100%',
+    height: '100%',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: Platform.OS === 'ios' ? 20 : 0,
+  },
+  modalContent: {
+    backgroundColor: '#fff',
+    borderRadius: 15,
+    padding: 20,
+    width: Platform.OS === 'ios' ? '90%' : '100%',
+    maxHeight: Platform.OS === 'ios' ? '80%' : '100%',
+  },
+  modalHeader: {
+    marginBottom: 15,
+  },
+  modalTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#333',
+    textAlign: 'center',
+  },
+  selectedAccount: {
+    fontSize: 14,
+    color: '#666',
+    textAlign: 'center',
+    marginTop: 5,
+  },
+  selectionInfo: {
+    fontSize: 12,
+    color: '#007AFF',
+    textAlign: 'center',
+    marginTop: 2,
+    fontWeight: '500',
+  },
+  selectionControls: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 15,
+    gap: 5,
+  },
+  selectionButton: {
+    flex: 1,
+    padding: 8,
+    backgroundColor: '#f8f8f8',
+    borderRadius: 6,
+    alignItems: 'center',
+  },
+  selectionButtonText: {
+    fontSize: 12,
+    color: '#333',
+    fontWeight: '500',
+  },
+  clearAllText: {
+    color: '#FF3B30',
+  },
+  mediaListContainer: {
+    flex: 1,
+    marginBottom: 20,
+  },
+  mediaList: {
+    maxHeight: 300,
+  },
+  mediaItem: {
+    flexDirection: 'row',
+    backgroundColor: '#f8f8f8',
+    padding: 12,
+    borderRadius: 8,
+    marginBottom: 8,
+    alignItems: 'center',
+  },
+  mediaItemSelected: {
+    backgroundColor: '#e8f4fd',
+    borderColor: '#007AFF',
+    borderWidth: 1,
+  },
+  mediaPreview: {
+    marginRight: 12,
+  },
+  mediaThumbnail: {
+    width: 50,
+    height: 50,
+    borderRadius: 6,
+  },
+  videoThumbnail: {
+    backgroundColor: '#e0e0e0',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  videoIcon: {
+    fontSize: 16,
+    color: '#666',
+    fontWeight: 'bold',
+  },
+  mediaInfo: {
+    flex: 1,
+  },
+  mediaName: {
+    fontSize: 14,
+    color: '#333',
+    fontWeight: '500',
+    marginBottom: 2,
+  },
+  fileSize: {
+    fontSize: 12,
+    color: '#666',
+    marginBottom: 6,
+  },
+  scheduleButton: {
+    backgroundColor: '#f0f0f0',
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+    borderRadius: 4,
+    marginBottom: 4,
+    alignSelf: 'flex-start',
+  },
+  scheduleButtonText: {
+    fontSize: 11,
+    color: '#666',
+    fontWeight: '500',
+  },
+  captionButton: {
+    backgroundColor: '#f0f8ff',
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+    borderRadius: 4,
+    marginBottom: 6,
+    alignSelf: 'flex-start',
+    borderWidth: 1,
+    borderColor: '#007AFF',
+  },
+  captionButtonText: {
+    fontSize: 11,
+    color: '#007AFF',
+    fontWeight: '500',
+  },
+  statusContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  statusWithIcon: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  statusIcon: {
+    fontSize: 12,
+  },
+  statusText: {
+    fontSize: 12,
+    fontWeight: '500',
+  },
+  progressText: {
+    fontSize: 12,
+    color: '#007AFF',
+    fontWeight: '500',
+  },
+  chunkProgressText: {
+    fontSize: 11,
+    color: '#666',
+    marginTop: 2,
+  },
+  progressBar: {
+    height: 3,
+    backgroundColor: '#e0e0e0',
+    borderRadius: 2,
+    marginTop: 4,
+    overflow: 'hidden',
+  },
+  progressFill: {
+    height: '100%',
+    backgroundColor: '#007AFF',
+    borderRadius: 2,
+  },
+  removeMediaButton: {
+    padding: 4,
+  },
+  removeMediaText: {
+    color: '#FF3B30',
+    fontSize: 18,
+    fontWeight: 'bold',
+  },
+  noMediaContainer: {
+    padding: 40,
+    alignItems: 'center',
+    marginBottom: 20,
+  },
+  noMediaText: {
+    fontSize: 16,
+    color: '#666',
+    marginBottom: 8,
+  },
+  noMediaSubtext: {
+    fontSize: 14,
+    color: '#999',
+    textAlign: 'center',
+  },
+  mediaButtons: {
+    gap: 10,
+    marginBottom: 20,
+  },
+  mediaButton: {
+    backgroundColor: '#f8f8f8',
+    padding: 15,
+    borderRadius: 10,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#ddd',
+  },
+  mediaButtonText: {
+    fontSize: 16,
+    color: '#333',
+    fontWeight: '500',
+  },
+  actionButtons: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  cancelButton: {
+    flex: 1,
+    padding: 15,
+    borderRadius: 10,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#ddd',
+  },
+  cancelButtonText: {
+    fontSize: 16,
+    color: '#666',
+    fontWeight: '500',
+  },
+  uploadModalButton: {
+    flex: 2,
+    backgroundColor: '#34C759',
+    padding: 15,
+    borderRadius: 10,
+    alignItems: 'center',
+  },
+  uploadModalButtonDisabled: {
+    backgroundColor: '#ccc',
+  },
+  uploadModalButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  uploadingContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  uploadingText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '500',
+  },
+
+  // FIXED SCHEDULE MODAL STYLES
+  scheduleModalContent: {
+    backgroundColor: '#fff',
+    borderRadius: 15,
+    padding: 20,
+    width: Platform.OS === 'ios' ? '90%' : '95%',
+    maxHeight: Platform.OS === 'ios' ? '80%' : '90%',
+    marginHorizontal: 20,
+  },
+  scheduleModalTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#333',
+    textAlign: 'center',
+    marginBottom: 10,
+  },
+  scheduleMediaName: {
+    fontSize: 14,
+    color: '#666',
+    textAlign: 'center',
+    marginBottom: 20,
+    fontStyle: 'italic',
+  },
+  scheduleTypeContainer: {
+    marginBottom: 20,
+  },
+  scheduleTypeLabel: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#333',
+    marginBottom: 10,
+  },
+  scheduleTypeButtons: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  scheduleTypeButton: {
+    flex: 1,
+    padding: 12,
+    backgroundColor: '#f8f8f8',
+    borderRadius: 8,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#ddd',
+  },
+  scheduleTypeButtonActive: {
+    backgroundColor: '#007AFF',
+    borderColor: '#007AFF',
+  },
+  scheduleTypeButtonText: {
+    fontSize: 14,
+    color: '#666',
+    fontWeight: '500',
+  },
+  scheduleTypeButtonTextActive: {
+    color: '#fff',
+  },
+  datetimeContainer: {
+    marginBottom: 20,
+    backgroundColor: '#f8f8f8',
+    padding: 15,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+  },
+  datetimeLabel: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#333',
+    marginBottom: 15,
+  },
+  pickerRow: {
+    flexDirection: 'row',
+    gap: 10,
+    marginBottom: 15,
+  },
+  pickerColumn: {
+    flex: 1,
+  },
+  pickerLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#333',
+    marginBottom: 8,
+  },
+  pickerButton: {
+    borderWidth: 1,
+    borderColor: '#ddd',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    backgroundColor: '#fff',
+    alignItems: 'center',
+    minHeight: 44,
+    justifyContent: 'center',
+  },
+  pickerButtonText: {
+    fontSize: 14,
+    color: '#333',
+    fontWeight: '500',
+  },
+  // Removed pickerWrapper - it's no longer needed for conditional rendering of DateTimePicker
+  dateTimePickerIos: {
+    height: 200,
+    width: '100%', // Make it fill the width of its container
+    backgroundColor: '#fff',
+    // No specific positioning here, let the modal center it
+  },
+  pickerDoneButton: {
+    backgroundColor: '#007AFF',
+    padding: 12,
+    borderRadius: 8,
+    alignItems: 'center',
+    marginTop: 10,
+  },
+  pickerDoneButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  selectedDateTimeContainer: {
+    backgroundColor: '#e8f4fd',
+    padding: 12,
+    borderRadius: 8,
+    marginTop: 10,
+    borderLeftWidth: 4,
+    borderLeftColor: '#007AFF',
+  },
+  selectedDateTimeLabel: {
+    fontSize: 12,
+    color: '#007AFF',
+    fontWeight: '500',
+    marginBottom: 4,
+  },
+  selectedDateTimeText: {
+    fontSize: 14,
+    color: '#333',
+    fontWeight: '600',
+  },
+  rangeInfo: {
+    backgroundColor: '#f8f8f8',
+    padding: 15,
+    borderRadius: 8,
+    marginBottom: 20,
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+  },
+  rangeInfoText: {
+    fontSize: 14,
+    color: '#666',
+    textAlign: 'center',
+    lineHeight: 20,
+  },
+  scheduleModalActions: {
+    flexDirection: 'row',
+    gap: 10,
+    marginTop: 10,
+  },
+  scheduleCancelButton: {
+    flex: 1,
+    padding: 15,
+    borderRadius: 8,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#ddd',
+    backgroundColor: '#fff',
+  },
+  scheduleCancelButtonText: {
+    fontSize: 16,
+    color: '#666',
+    fontWeight: '500',
+  },
+  scheduleSaveButton: {
+    flex: 1,
+    backgroundColor: '#007AFF',
+    padding: 15,
+    borderRadius: 8,
+    alignItems: 'center',
+  },
+  scheduleSaveButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  captionModalContent: {
+    backgroundColor: '#fff',
+    borderRadius: 15,
+    padding: 20,
+    width: Platform.OS === 'ios' ? '90%' : '100%',
+    maxHeight: Platform.OS === 'ios' ? '60%' : '100%',
+  },
+  captionModalTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#333',
+    textAlign: 'center',
+    marginBottom: 10,
+  },
+  captionMediaName: {
+    fontSize: 14,
+    color: '#666',
+    textAlign: 'center',
+    marginBottom: 20,
+    fontStyle: 'italic',
+  },
+  captionInputContainer: {
+    marginBottom: 20,
+  },
+  captionLabel: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#333',
+    marginBottom: 8,
+  },
+  captionInput: {
+    borderWidth: 1,
+    borderColor: '#ddd',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    fontSize: 14,
+    backgroundColor: '#fff',
+    minHeight: 100,
+    textAlignVertical: 'top',
+  },
+  captionCounter: {
+    fontSize: 12,
+    color: '#666',
+    textAlign: 'right',
+    marginTop: 4,
+  },
+  captionModalActions: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  captionCancelButton: {
+    flex: 1,
+    padding: 15,
+    borderRadius: 8,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#ddd',
+  },
+  captionCancelButtonText: {
+    fontSize: 16,
+    color: '#666',
+    fontWeight: '500',
+  },
+  captionSaveButton: {
+    flex: 1,
+    backgroundColor: '#007AFF',
+    padding: 15,
+    borderRadius: 8,
+    alignItems: 'center',
+  },
+  captionSaveButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  // New styles for iOS Picker Modals
+  iosPickerBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'flex-end', // Position at the bottom
+  },
+  iosPickerContainer: {
+    backgroundColor: '#fff',
+    width: '100%',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    paddingHorizontal: 20,
+    paddingTop: 20,
+    paddingBottom: Platform.OS === 'ios' ? 30 : 20, // Account for safe area on iOS
+    alignItems: 'center', // Center content horizontally
+  },
+});
 
 export default UploadScreen;
+
+
